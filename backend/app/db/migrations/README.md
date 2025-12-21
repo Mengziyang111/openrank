@@ -1,1 +1,3 @@
-PostgreSQL 迁移脚本占位（复赛/生产再补 Alembic）。
+PostgreSQL 初始化迁移脚本：
+
+- `001_init.sql`：创建 metric_points / repo_snapshots / reports / watchlist / alerts / repo_catalog 表。

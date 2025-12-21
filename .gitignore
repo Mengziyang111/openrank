@@ -9,3 +9,8 @@ node_modules/
 dist/
 backend/app.db
 data/cache/
+# 忽略数据库数据 (千万不能传!)
+data/pg_data/
+backend/data/pg_data/
+*.db
+*.sqlite3

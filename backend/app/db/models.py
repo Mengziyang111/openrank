@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, Text, Date, Float, Boolean, TIMESTAMP, func
-from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
+from sqlalchemy import Column, Integer, Text, Date, Float, Boolean, TIMESTAMP, func, JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from app.db.base import Base
+
+JSONType = JSON().with_variant(JSONB, "postgresql")
 
 class MetricPoint(Base):
     __tablename__ = "metric_points"
@@ -17,7 +19,7 @@ class RepoSnapshot(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     repo = Column(Text, nullable=False, index=True)
     window_days = Column(Integer, nullable=False)
-    snapshot_json = Column(SQLITE_JSON, nullable=False)
+    snapshot_json = Column(JSONType, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 class Report(Base):
@@ -26,14 +28,14 @@ class Report(Base):
     repo = Column(Text, nullable=False, index=True)
     mode = Column(Text, nullable=False)
     query = Column(Text, nullable=False)
-    payload_json = Column(SQLITE_JSON, nullable=False)
+    payload_json = Column(JSONType, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 class WatchList(Base):
     __tablename__ = "watchlist"
     id = Column(Integer, primary_key=True, autoincrement=True)
     repo = Column(Text, nullable=False, unique=True, index=True)
-    rules_json = Column(SQLITE_JSON, nullable=False)
+    rules_json = Column(JSONType, nullable=False)
     enabled = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -45,7 +47,7 @@ class Alert(Base):
     metric = Column(Text, nullable=False, index=True)
     level = Column(Text, nullable=False)
     reason = Column(Text, nullable=False)
-    evidence_json = Column(SQLITE_JSON)
+    evidence_json = Column(JSONType)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 class RepoCatalog(Base):
@@ -54,7 +56,7 @@ class RepoCatalog(Base):
     repo = Column(Text, nullable=False, unique=True, index=True)
     domain = Column(Text)
     language = Column(Text)
-    tags_json = Column(SQLITE_JSON)
+    tags_json = Column(JSONType)
     difficulty = Column(Integer)
     tech_family = Column(Text)
     notes = Column(Text)

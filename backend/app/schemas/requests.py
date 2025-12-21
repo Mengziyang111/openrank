@@ -13,3 +13,9 @@ class ChatRequest(BaseModel):
     repos: list[str] = Field(default_factory=list, description="repo list for portfolio")
     portfolio: Optional[str] = None
     time_window: TimeWindow = Field(default_factory=TimeWindow)
+
+
+class BatchTrendRequest(BaseModel):
+    repos: list[str] = Field(..., description="repo list")
+    metric: str = Field(..., description="metric name")
+    range: str = Field("30d", description="time range like 30d")

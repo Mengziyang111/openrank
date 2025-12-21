@@ -1,9 +1,11 @@
 from __future__ import annotations
 from datetime import date
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.db.models import MetricPoint
+from app.schemas.requests import BatchTrendRequest
+from app.services.metrics import get_batch_trend, parse_range_days
 from app.tools.opendigger_client import OpenDiggerClient
 
 router = APIRouter(prefix="/api", tags=["metrics"])
@@ -143,3 +145,19 @@ def compare(
         "delta": delta,
         "delta_pct": delta_pct,
     }
+
+
+@router.post("/metrics/batch_trend")
+def batch_trend(payload: BatchTrendRequest, db: Session = Depends(get_db)):
+    if not payload.repos:
+        raise HTTPException(status_code=400, detail="repos is required")
+    if payload.metric not in _METRIC_FILES:
+        raise HTTPException(status_code=400, detail="unsupported metric")
+    invalid_repos = [repo for repo in payload.repos if "/" not in repo]
+    if invalid_repos:
+        raise HTTPException(status_code=400, detail="repos must be in owner/repo format")
+    try:
+        parse_range_days(payload.range)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_batch_trend(payload.repos, payload.metric, payload.range, db)

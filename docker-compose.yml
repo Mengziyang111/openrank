@@ -7,18 +7,39 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      - DATABASE_URL=sqlite:///./app.db
+      - DATABASE_URL=postgresql+psycopg2://openrank:openrank@openrank-postgres:5432/openrank
+    networks:
+      - openrank-net
     command: ["python","-m","uvicorn","app.main:app","--host","0.0.0.0","--port","8000","--reload"]
 
-  # Optional: enable later
-  # db:
-  #   image: postgres:16
-  #   environment:
-  #     POSTGRES_PASSWORD=postgres
-  #   ports:
-  #     - "5432:5432"
-  #
-  # redis:
-  #   image: redis:7
-  #   ports:
-  #     - "6379:6379"
+  openrank-postgres:
+    image: postgres:16
+    container_name: openrank-postgres
+    environment:
+      - POSTGRES_USER=openrank
+      - POSTGRES_PASSWORD=openrank
+      - POSTGRES_DB=openrank
+    ports:
+      - "5432:5432"
+    volumes:
+      - openrank-postgres-data:/var/lib/postgresql/data
+    networks:
+      - openrank-net
+
+  dataease:
+    image: dataease/dataease:latest
+    ports:
+      - "8100:8100"
+    depends_on:
+      - openrank-postgres
+    networks:
+      - openrank-net
+    # DataEase 数据源配置请使用：
+    # host: openrank-postgres
+    # port: 5432
+
+volumes:
+  openrank-postgres-data:
+
+networks:
+  openrank-net:

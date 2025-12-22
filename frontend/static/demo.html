@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenSage Demo — Project Health</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px }
+    .container { max-width:900px; margin: 0 auto }
+    .controls { margin-bottom: 12px }
+    .card { border:1px solid #ddd; padding:12px; border-radius:6px; margin-bottom:10px }
+    .charts { display:flex; gap:12px; flex-wrap:wrap }
+    .chart-box { width: 100%; max-width:420px }
+    pre { background:#f6f8fa; padding:10px; border-radius:6px; overflow:auto }
+    .actions { margin-top:10px }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>OpenSage Demo — 项目健康监控 (Mock)</h1>
+    <div class="controls">
+      <input id="repo" placeholder="owner/repo (例如 apache/superset)" value="apache/superset" />
+      <button id="run">Run Demo</button>
+      <button id="exportJson">导出 JSON</button>
+      <button id="exportMd">导出 Markdown</button>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="summary" class="card" style="display:none">
+      <h3 id="headline"></h3>
+      <p>Status: <strong id="statusText"></strong></p>
+      <div><strong>Key points:</strong>
+        <ul id="keypoints"></ul>
+      </div>
+    </div>
+
+    <div id="chartsArea" class="charts"></div>
+
+    <div id="actionsArea" class="card" style="display:none">
+      <h4>Suggested Actions</h4>
+      <ul id="actionsList"></ul>
+    </div>
+
+    <h4>Raw Output</h4>
+    <pre id="raw">(empty)</pre>
+  </div>
+
+<script>
+async function runDemo() {
+  const repo = document.getElementById('repo').value.trim();
+  const statusEl = document.getElementById('status');
+  statusEl.textContent = 'Running...';
+  try {
+    const res = await fetch('/api/demo/project_health', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '项目近3个月表现如何', repo })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const report = await res.json();
+    renderReport(report);
+    window._lastReport = report;
+    statusEl.textContent = 'Done';
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderReport(report) {
+  document.getElementById('raw').textContent = JSON.stringify(report, null, 2);
+  const s = report.summary || {};
+  document.getElementById('headline').textContent = s.headline || '';
+  document.getElementById('statusText').textContent = s.status || '';
+  const k = document.getElementById('keypoints'); k.innerHTML = '';
+  (s.key_points || []).forEach(p => { const li = document.createElement('li'); li.textContent = p; k.appendChild(li); });
+  document.getElementById('summary').style.display = '';
+
+  const chartsArea = document.getElementById('chartsArea'); chartsArea.innerHTML = '';
+  (report.charts || []).forEach((c, i) => {
+    const box = document.createElement('div'); box.className = 'chart-box card';
+    const title = document.createElement('div'); title.innerHTML = '<strong>' + c.title + '</strong>';
+    const canvas = document.createElement('canvas'); canvas.id = 'chart_' + i; canvas.style.width = '100%';
+    box.appendChild(title); box.appendChild(canvas);
+    chartsArea.appendChild(box);
+    const labels = (c.data || []).map(d => d.dt || d.date || '');
+    const values = (c.data || []).map(d => d.value || 0);
+    new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: c.title, data: values, borderColor: 'rgba(75,192,192,1)', tension: 0.2 }] }, options: { responsive: true, maintainAspectRatio: false } });
+  });
+
+  const actionsArea = document.getElementById('actionsArea'); const actionsList = document.getElementById('actionsList'); actionsList.innerHTML = '';
+  (report.actions || []).forEach(a => { const li = document.createElement('li'); li.textContent = `${a.action} (${a.priority})`; actionsList.appendChild(li); });
+  actionsArea.style.display = report.actions && report.actions.length ? '' : 'none';
+}
+
+function download(filename, text) {
+  const el = document.createElement('a'); el.href = 'data:application/octet-stream;charset=utf-8,' + encodeURIComponent(text); el.download = filename; document.body.appendChild(el); el.click(); el.remove();
+}
+
+document.getElementById('run').addEventListener('click', runDemo);
+document.getElementById('exportJson').addEventListener('click', () => {
+  if (!window._lastReport) return alert('No report'); download('report.json', JSON.stringify(window._lastReport, null, 2));
+});
+document.getElementById('exportMd').addEventListener('click', () => {
+  if (!window._lastReport) return alert('No report');
+  const r = window._lastReport; let md = `# ${r.summary.headline}\n\nStatus: **${r.summary.status}**\n\n## Key points\n`;
+  (r.summary.key_points||[]).forEach(p => { md += `- ${p}\n`; });
+  md += `\n## Actions\n`;
+  (r.actions||[]).forEach(a => { md += `- ${a.action} (${a.priority})\n`; });
+  md += `\n## Raw\n\n\`\`\`json\n${JSON.stringify(r, null, 2)}\n\`\`\``;
+  download('report.md', md);
+});
+</script>
+</body>
+</html>

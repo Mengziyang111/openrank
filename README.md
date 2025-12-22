@@ -31,7 +31,7 @@ Demo endpoint (mock mode enabled by default):
 - POST http://127.0.0.1:8000/api/demo/project_health
 - Example payload: {"query":"项目近3个月健康如何？","repo":"apache/superset","time_window":{"days":90}}
 - The demo uses local mock data when `USE_MOCK` is true in `.env` or `app.core.config` default.
-- Frontend demo page: `frontend` -> open `Chat.vue` page (run `npm run dev` in frontend folder).
+- Frontend demo page: simple static demo is available at http://127.0.0.1:8000/demo/demo.html (served by backend). It calls the demo endpoint and renders charts and export options. If you prefer developing a full SPA, the `frontend/src/pages/Chat.vue` and `frontend/src/components/ReportViewer.vue` are provided as components to integrate into your app scaffold.
 
 ---
 

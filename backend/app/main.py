@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.core.logging import setup_logging
 from app.db.init_db import init_db
 
@@ -13,6 +14,9 @@ from app.api.demo import router as demo_router
 
 setup_logging()
 app = FastAPI(title="OpenSODA OSS Copilot")
+
+# Serve simple static demo UI at /demo
+app.mount("/demo", StaticFiles(directory="frontend/static", html=True), name="demo")
 
 @app.on_event("startup")
 def _startup():

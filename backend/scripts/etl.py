@@ -1,17 +1,14 @@
 from __future__ import annotations
+
 import argparse
 from pathlib import Path
 from typing import Iterable, Iterator
+
 from app.db.init_db import init_db
 from app.db.base import SessionLocal
 from app.db.models import MetricPoint
+from app.registry import METRIC_FILES, SUPPORTED_METRICS, ensure_supported
 from app.tools.opendigger_client import OpenDiggerClient
-
-_METRIC_FILES = {
-    "openrank": "openrank.json",
-    "activity": "activity.json",
-    "attention": "attention.json",
-}
 
 
 def _parse_metrics(value: str) -> list[str]:
@@ -24,9 +21,11 @@ def fetch_metrics(repo: str, metrics: Iterable[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     with SessionLocal() as db:
         for metric in metrics:
-            metric_file = _METRIC_FILES.get(metric)
+            metric_file = METRIC_FILES.get(metric)
             if not metric_file:
+                # should not happen if ensure_supported() was called
                 continue
+
             records = client.fetch_metric(owner, name, metric_file)
             counts[metric] = 0
             for record in records:
@@ -88,7 +87,7 @@ def main() -> None:
     parser.add_argument(
         "--metrics",
         default="openrank,activity,attention",
-        help="comma-separated metrics",
+        help=f"comma-separated metrics (supported: {', '.join(SUPPORTED_METRICS)})",
     )
     parser.add_argument(
         "--state-file",
@@ -101,8 +100,13 @@ def main() -> None:
         help="resume from last repo recorded in --state-file",
     )
     args = parser.parse_args()
+
     init_db()
+
     metrics = _parse_metrics(args.metrics)
+    # validate early (fail-fast)
+    ensure_supported(metrics)
+
     if args.repo:
         counts = fetch_metrics(args.repo, metrics)
         _store_resume_marker(args.state_file, args.repo)

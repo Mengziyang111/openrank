@@ -3,6 +3,8 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Any, List
 import httpx
+import json
+from pathlib import Path
 from app.core.config import settings
 
 @dataclass(frozen=True)
@@ -41,6 +43,21 @@ class OpenDiggerClient:
         return f"{self.base_url}/{self.platform}/{owner}/{repo}/{metric_file}"
 
     def fetch_metric(self, owner: str, repo: str, metric_file: str) -> List[MetricRecord]:
+        """Fetch metric time series.
+        If settings.USE_MOCK is True, load demo data from backend/data/demo_project_health.json
+        which has shape: {"openrank": {"2025-09-01": 12, ...}, ...}
+        """
+        if settings.USE_MOCK:
+            demo_path = Path(__file__).resolve().parents[2] / "data" / "demo_project_health.json"
+            if demo_path.exists():
+                try:
+                    payload = json.loads(demo_path.read_text(encoding="utf-8"))
+                    key = metric_file.replace('.json','')
+                    metric_payload = payload.get(key, {})
+                    return normalize_metric_json(metric_payload)
+                except Exception:
+                    # fallthrough to live request on error
+                    pass
         url = self.metric_url(owner, repo, metric_file)
         with httpx.Client(timeout=self.timeout, follow_redirects=True) as c:
             r = c.get(url)

@@ -27,6 +27,12 @@ Open:
 - 终端输入开启后端服务：uvicorn app.main:app --reload
 - http://127.0.0.1:8000/health
 
+Demo endpoint (mock mode enabled by default):
+- POST http://127.0.0.1:8000/api/demo/project_health
+- Example payload: {"query":"项目近3个月健康如何？","repo":"apache/superset","time_window":{"days":90}}
+- The demo uses local mock data when `USE_MOCK` is true in `.env` or `app.core.config` default.
+- Frontend demo page: `frontend` -> open `Chat.vue` page (run `npm run dev` in frontend folder).
+
 ---
 
 ## Project Structure

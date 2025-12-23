@@ -23,9 +23,18 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open:
+- 后端启动:
+```bash
+uvicorn app.main:app --reload
+```
 - http://127.0.0.1:8000/health
 
+-前端启动：
+```bash
+cd ui-react
+npm run dev 
+```
+-http://127.0.0.1:5173/
 ---
 
 ## Project Structure

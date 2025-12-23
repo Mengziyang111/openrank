@@ -22,7 +22,10 @@ def _parse_dt(key: str) -> dt.date:
 
 def normalize_metric_json(payload: Any) -> List[MetricRecord]:
     out: List[MetricRecord] = []
-    if isinstance(payload, dict):
+    # 兼容 issue_response_time / issue_resolution_duration / issue_age
+# change_request_response_time / change_request_resolution_duration / change_request_age
+    if isinstance(payload, dict) and "avg" in payload and isinstance(payload["avg"], dict):
+        payload = payload["avg"]
         for k, v in payload.items():
             try:
                 out.append(MetricRecord(_parse_dt(str(k)), float(v)))

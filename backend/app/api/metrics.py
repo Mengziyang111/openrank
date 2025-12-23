@@ -7,10 +7,10 @@ from app.db.models import MetricPoint
 from app.schemas.requests import BatchTrendRequest
 from app.services.metrics import get_batch_trend, parse_range_days
 from app.tools.opendigger_client import OpenDiggerClient
+from app.registry import METRIC_FILES, SUPPORTED_METRICS, normalize_metrics, ensure_supported
 
 router = APIRouter(prefix="/api", tags=["metrics"])
 
-_METRIC_FILES = {"openrank": "openrank.json", "activity": "activity.json", "attention": "attention.json"}
 
 
 def _add_months(value: date, months: int) -> date:
@@ -21,12 +21,30 @@ def _add_months(value: date, months: int) -> date:
 
 
 @router.post("/etl/fetch")
-def etl_fetch(repo: str, metrics: list[str] | None = None, db: Session = Depends(get_db)):
+def etl_fetch(
+    repo: str,
+    metrics: list[str] | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Fetch metrics from OpenDigger and upsert into MetricPoint table.
+
+    Supports both:
+      - /etl/fetch?repo=owner/repo&metrics=openrank&metrics=activity
+      - /etl/fetch?repo=owner/repo&metrics=openrank,activity
+    """
+    if "/" not in repo:
+        raise HTTPException(status_code=400, detail="repo must be in owner/repo format")
+
+    metrics_list = normalize_metrics(metrics, default=["openrank", "activity", "attention"])
+    try:
+        ensure_supported(metrics_list)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     owner, name = repo.split("/", 1)
     client = OpenDiggerClient()
-    metrics = metrics or ["openrank", "activity", "attention"]
-    for m in metrics:
-        mf = _METRIC_FILES.get(m)
+    for m in metrics_list:
+        mf = METRIC_FILES.get(m)
         if not mf:
             continue
         recs = client.fetch_metric(owner, name, mf)
@@ -45,11 +63,14 @@ def etl_fetch(repo: str, metrics: list[str] | None = None, db: Session = Depends
             else:
                 db.add(MetricPoint(repo=repo, metric=m, dt=r.date, value=r.value))
     db.commit()
-    return {"ok": True, "repo": repo, "metrics": metrics}
+    return {"ok": True, "repo": repo, "metrics": metrics_list}
 
 
 @router.get("/metrics/trend")
 def trend(repo: str, metric: str = Query(...), db: Session = Depends(get_db)):
+    if metric not in METRIC_FILES:
+        raise HTTPException(status_code=400, detail=f"unsupported metric: {metric}. supported={SUPPORTED_METRICS}")
+
     rows = (
         db.query(MetricPoint)
         .filter(MetricPoint.repo == repo, MetricPoint.metric == metric)
@@ -65,6 +86,9 @@ def trend(repo: str, metric: str = Query(...), db: Session = Depends(get_db)):
 
 @router.get("/metrics/latest")
 def latest(repo: str, metric: str = Query(...), months: int = Query(3, ge=1), db: Session = Depends(get_db)):
+    if metric not in METRIC_FILES:
+        raise HTTPException(status_code=400, detail=f"unsupported metric: {metric}. supported={SUPPORTED_METRICS}")
+
     latest_row = (
         db.query(MetricPoint)
         .filter(MetricPoint.repo == repo, MetricPoint.metric == metric)
@@ -100,6 +124,9 @@ def compare(
     window_days: int = Query(30, ge=1),
     db: Session = Depends(get_db),
 ):
+    if metric not in METRIC_FILES:
+        raise HTTPException(status_code=400, detail=f"unsupported metric: {metric}. supported={SUPPORTED_METRICS}")
+
     rows = (
         db.query(MetricPoint)
         .filter(MetricPoint.repo == repo, MetricPoint.metric == metric)
@@ -151,8 +178,8 @@ def compare(
 def batch_trend(payload: BatchTrendRequest, db: Session = Depends(get_db)):
     if not payload.repos:
         raise HTTPException(status_code=400, detail="repos is required")
-    if payload.metric not in _METRIC_FILES:
-        raise HTTPException(status_code=400, detail="unsupported metric")
+    if payload.metric not in METRIC_FILES:
+        raise HTTPException(status_code=400, detail=f"unsupported metric: {payload.metric}. supported={SUPPORTED_METRICS}")
     invalid_repos = [repo for repo in payload.repos if "/" not in repo]
     if invalid_repos:
         raise HTTPException(status_code=400, detail="repos must be in owner/repo format")

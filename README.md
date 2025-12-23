@@ -34,7 +34,7 @@ uvicorn app.main:app --reload
 cd ui-react
 npm run dev 
 ```
--http://127.0.0.1:5173/
+- http://127.0.0.1:5173/
 ---
 
 ## Project Structure

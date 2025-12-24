@@ -26,6 +26,8 @@ export default function App() {
   const [status, setStatus] = useState("就绪");
   const [openrankPoints, setOpenrankPoints] = useState([]);
   const [activityPoints, setActivityPoints] = useState([]);
+  const [embedInfo, setEmbedInfo] = useState(null);
+  const [bootstrapStatus, setBootstrapStatus] = useState("未初始化");
 
   const openrankLast = useMemo(() => latest(openrankPoints), [openrankPoints]);
   const activityLast = useMemo(() => latest(activityPoints), [activityPoints]);
@@ -65,6 +67,24 @@ export default function App() {
       console.error(e);
       setStatus("失败 ❌ " + e.message);
     }
+  }
+
+  async function bootstrapDataEase() {
+    if (!repo.includes("/")) {
+      setBootstrapStatus("失败 ❌ repo 格式应为 owner/repo");
+      return;
+    }
+    setBootstrapStatus("DataEase 初始化中...");
+    const url = `/api/dataease/bootstrap?repo=${encodeURIComponent(repo)}`;
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) {
+      const msg = await res.text();
+      setBootstrapStatus(`失败 ❌ ${msg}`);
+      return;
+    }
+    const data = await res.json();
+    setEmbedInfo(data);
+    setBootstrapStatus(data.reuse ? `复用已存在 screenId=${data.screen_id}` : `已创建 screenId=${data.screen_id}`);
   }
 
   return (
@@ -111,6 +131,35 @@ export default function App() {
           <div style={{ color: "#666", fontSize: 13 }}>Activity 趋势</div>
           <ReactECharts option={activityOption} style={{ height: 360 }} />
         </div>
+      </div>
+
+      <div style={{ marginTop: 18, padding: 16, border: "1px solid #ddd", borderRadius: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: "#666", fontSize: 13 }}>DataEase 健康总览大屏</div>
+            <div style={{ color: "#999", fontSize: 12 }}>
+              按“一键生成/复用”后，会调用 /api/dataease/bootstrap 自动创建数据源/数据集/大屏，并返回嵌入链接。
+            </div>
+          </div>
+          <button onClick={bootstrapDataEase} style={{ padding: "10px 14px", borderRadius: 10, border: 0, background: "#2563eb", color: "#fff" }}>
+            一键生成/复用
+          </button>
+          <div style={{ color: "#666" }}>状态：{bootstrapStatus}</div>
+        </div>
+
+        {embedInfo?.embed_url && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ color: "#666", fontSize: 13, marginBottom: 6 }}>嵌入链接</div>
+            <input
+              value={embedInfo.embed_url}
+              readOnly
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #ccc", fontFamily: "monospace" }}
+            />
+            <div style={{ marginTop: 12, border: "1px solid #ccc", borderRadius: 12, overflow: "hidden" }}>
+              <iframe title="DataEase dashboard" src={embedInfo.embed_url} style={{ width: "100%", height: 420, border: 0 }} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

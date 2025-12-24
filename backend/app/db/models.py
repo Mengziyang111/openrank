@@ -60,3 +60,17 @@ class RepoCatalog(Base):
     difficulty = Column(Integer)
     tech_family = Column(Text)
     notes = Column(Text)
+
+
+class DataEaseBinding(Base):
+    __tablename__ = "dataease_bindings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(Text, nullable=False, unique=True, index=True)
+    data_source_id = Column(Text, nullable=False)
+    dataset_ids = Column(JSONType, nullable=False)
+    screen_id = Column(Text, nullable=False)
+    embed_url = Column(Text, nullable=False)
+    raw_json = Column(JSONType)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

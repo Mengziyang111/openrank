@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.db.models import HealthOverviewDaily
 from app.schemas.requests import HealthIngestRequest
+from app.services.health_refresh import refresh_health_overview
 from app.services.metric_engine import MetricEngine
 
 router = APIRouter(prefix="/api/health", tags=["health_overview"])
@@ -30,6 +31,17 @@ def ingest_overview(payload: HealthIngestRequest, db: Session = Depends(get_db))
     )
     saved = engine.upsert(db, record)
     return {"data": _serialize(saved)}
+
+
+@router.post("/refresh")
+def refresh(repo_full_name: str = Query(..., description="owner/repo"), db: Session = Depends(get_db)):
+    try:
+        data = refresh_health_overview(db, repo_full_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - network or third-party failures
+        raise HTTPException(status_code=502, detail=f"refresh failed: {exc}") from exc
+    return {"data": data}
 
 
 @router.get("/overview/latest")

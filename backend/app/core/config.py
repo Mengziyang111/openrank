@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     DATAEASE_FEED_BASE_URL: str | None = None
     DATAEASE_EMBED_APP_ID: str | None = None
     DATAEASE_EMBED_APP_SECRET: str | None = None
+    GITHUB_TOKEN: str | None = None
     MAXKB_BASE_URL: str | None = None
     LLM_BASE_URL: str | None = None
     LLM_API_KEY: str | None = None

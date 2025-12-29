@@ -39,6 +39,7 @@ REGISTRY: Dict[str, MetricDef] = {
     "attention": MetricDef("attention", "attention.json", "统计指标", "关注度"),
     "technical_fork": MetricDef("technical_fork", "technical_fork.json", "统计指标", "技术分叉"),
     "active_dates_and_times": MetricDef("active_dates_and_times", "active_dates_and_times.json", "统计指标", "活动日期和时间"),
+    "stars": MetricDef("stars", "stars.json", "统计指标", "标星数量"),
 
     # Developers
     "new_contributors": MetricDef("new_contributors", "new_contributors.json", "开发者", "新贡献者"),
@@ -107,3 +108,4 @@ def ensure_supported(metrics: List[str]) -> List[str]:
     if unsupported:
         raise ValueError(f"unsupported metric(s): {unsupported}. supported={SUPPORTED_METRICS}")
     return metrics
+

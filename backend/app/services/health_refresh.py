@@ -14,18 +14,31 @@ from app.tools.opendigger_client import MetricRecord, OpenDiggerClient
 _OPENDIGGER_METRICS: Mapping[str, str] = {
     "openrank": "openrank.json",
     "activity": "activity.json",
+    "attention": "attention.json",
+    "technical_fork": "technical_fork.json",
     "new_contributors": "new_contributors.json",
     "contributors": "contributors.json",
     "inactive_contributors": "inactive_contributors.json",
     "bus_factor": "bus_factor.json",
+    "issues_closed": "issues_closed.json",
     "issues_new": "issues_new.json",
     "issue_response_time": "issue_response_time.json",
     "issue_resolution_duration": "issue_resolution_duration.json",
     "issue_age": "issue_age.json",
     "change_requests": "change_requests.json",
+    "change_requests_accepted": "change_requests_accepted.json",
+    "change_requests_reviews": "change_requests_reviews.json",
     "change_request_response_time": "change_request_response_time.json",
     "change_request_resolution_duration": "change_request_resolution_duration.json",
     "change_request_age": "change_request_age.json",
+    "code_change_lines_add": "code_change_lines_add.json",
+    "code_change_lines_remove": "code_change_lines_remove.json",
+    "code_change_lines_sum": "code_change_lines_sum.json",
+    "code_change_lines": "code_change_lines_sum.json",
+    "active_dates_and_times": "active_dates_and_times.json",
+    "activity_details": "activity_details.json",
+    "contributors_detail": "contributors_detail.json",
+    "stars": "stars.json",
 }
 
 
@@ -83,7 +96,7 @@ def fetch_github_governance(repo: str) -> Tuple[Dict[str, Any], float | None]:
     }
     if settings.GITHUB_TOKEN:
         headers["Authorization"] = f"Bearer {settings.GITHUB_TOKEN}"
-    with httpx.Client(timeout=10.0) as client:
+    with httpx.Client(timeout=10.0, verify=False) as client:
         resp = client.get(url, headers=headers)
         if resp.status_code == 404:
             return {}, None
@@ -105,7 +118,7 @@ def fetch_github_governance(repo: str) -> Tuple[Dict[str, Any], float | None]:
 
 def fetch_scorecard(repo: str) -> Tuple[float | None, Dict[str, Any], bool]:
     url = f"https://api.securityscorecards.dev/projects/github.com/{repo}"
-    with httpx.Client(timeout=15.0) as client:
+    with httpx.Client(timeout=15.0, verify=False) as client:
         resp = client.get(url)
         if resp.status_code == 404:
             return None, {}, True
@@ -126,20 +139,40 @@ def _compute_metrics_from_records(records: Dict[str, List[MetricRecord]]) -> Dic
     activity = records.get("activity", [])
     metrics["openrank"] = _latest(records.get("openrank", []))
     metrics["activity"] = _latest(activity)
+    metrics["attention"] = _latest(records.get("attention", []))
+    metrics["technical_fork"] = _latest(records.get("technical_fork", []))
+    metrics["community_openrank"] = _latest(records.get("community_openrank", []))
     metrics["activity_3m"] = _sum_tail(activity, 3) or None
     metrics["activity_prev_3m"] = _sum_slice(activity, -6, -3) or None
     metrics["active_months_12m"] = sum(1 for r in activity[-12:] if r.value > 0)
 
     contributors = records.get("contributors", [])
     metrics["participants_3m"] = _sum_tail(contributors, 3) or None
+    metrics["contributors"] = _latest(contributors)
 
     new_contrib = records.get("new_contributors", [])
     metrics["new_contributors_3m"] = _sum_tail(new_contrib, 3) or None
 
+    metrics["change_requests"] = _latest(records.get("change_requests", []))
+    metrics["change_requests_accepted"] = _latest(records.get("change_requests_accepted", []))
+    metrics["change_requests_reviews"] = _latest(records.get("change_requests_reviews", []))
+    metrics["change_request_response_time"] = _latest(records.get("change_request_response_time", []))
+    metrics["change_request_resolution_duration"] = _latest(records.get("change_request_resolution_duration", []))
+    metrics["change_request_age"] = _latest(records.get("change_request_age", []))
+
+    metrics["code_change_lines_add"] = _latest(records.get("code_change_lines_add", []))
+    metrics["code_change_lines_remove"] = _latest(records.get("code_change_lines_remove", []))
+    metrics["code_change_lines_sum"] = _latest(records.get("code_change_lines_sum", []))
+    metrics["code_change_lines"] = metrics.get("code_change_lines_sum")
+
     metrics["metric_issue_response_time_h"] = _latest(records.get("issue_response_time", []))
     metrics["metric_issue_resolution_duration_h"] = _latest(records.get("issue_resolution_duration", []))
     metrics["metric_issue_age_h"] = _latest(records.get("issue_age", []))
+    metrics["issue_response_time"] = metrics["metric_issue_response_time_h"]
+    metrics["issue_resolution_duration"] = metrics["metric_issue_resolution_duration_h"]
+    metrics["issue_age"] = metrics["metric_issue_age_h"]
     metrics["metric_issues_new"] = _latest(records.get("issues_new", []))
+    metrics["issues_closed"] = _latest(records.get("issues_closed", []))
 
     metrics["metric_pr_response_time_h"] = _latest(records.get("change_request_response_time", []))
     metrics["metric_pr_resolution_duration_h"] = _latest(records.get("change_request_resolution_duration", []))
@@ -154,6 +187,17 @@ def _compute_metrics_from_records(records: Dict[str, List[MetricRecord]]) -> Dic
             0.0,
             1 - metrics["metric_inactive_contributors"] / max(1.0, latest_contrib),
         )
+
+    stars_records = records.get("stars", [])
+    metrics["metric_stars"] = _latest(stars_records)
+    if len(stars_records) >= 2:
+        prev = stars_records[-2].value
+        curr = stars_records[-1].value
+        metrics["metric_stars_growth"] = curr - prev
+        metrics["metric_stars_growth_rate"] = (curr - prev) / prev if prev else None
+    else:
+        metrics["metric_stars_growth"] = None
+        metrics["metric_stars_growth_rate"] = None
     return metrics
 
 
@@ -161,10 +205,22 @@ def refresh_health_overview(db: Session, repo: str, dt_value: dt.date | None = N
     if "/" not in repo:
         raise ValueError("repo must be in owner/repo format")
 
-    dt_value = dt_value or dt.date.today()
+    # Prefer aligning to latest monthly snapshot from metric_points when available
+    if dt_value is None:
+        latest_dt = (
+            db.query(MetricPoint.dt)
+            .filter(MetricPoint.repo == repo)
+            .order_by(MetricPoint.dt.desc())
+            .limit(1)
+            .scalar()
+        )
+        dt_value = latest_dt or dt.date.today()
+    
+    # 1. 抓取 OpenDigger 数据 (raw_payloads 的来源)
     fetched = fetch_opendigger_metrics(db, repo)
     metrics = _compute_metrics_from_records(fetched)
 
+    # 2. 抓取 GitHub 和 Scorecard 数据
     governance_files, coverage = fetch_github_governance(repo)
     scorecard_score, scorecard_checks, defaulted = fetch_scorecard(repo)
 
@@ -178,6 +234,7 @@ def refresh_health_overview(db: Session, repo: str, dt_value: dt.date | None = N
         }
     )
 
+    # 3. 构建全量历史数据 (此时数据在内存中是完整的)
     raw_payloads = {
         "opendigger": {
             key: [{"dt": rec.date.isoformat(), "value": rec.value} for rec in value]
@@ -197,5 +254,19 @@ def refresh_health_overview(db: Session, repo: str, dt_value: dt.date | None = N
         security_defaulted=defaulted,
         raw_payloads=raw_payloads,
     )
+    
+    # 4. 存入数据库 (Upsert)
+    # 注意：这里通常只会存 metrics 分数，raw_payloads 可能会被数据库模型丢弃
     row = engine.upsert(db, record)
-    return engine.serialize(row)
+    
+    # 5. 获取基础返回结果 (这时候 raw_payloads 往往是空的)
+    result_dict = engine.serialize(row)
+
+    # ================= 核心修复 =================
+    # 6. 强行把第 3 步构建的全量数据注入到返回结果中
+    # 这样前端就能拿到数据，而不需要数据库支持
+    if isinstance(result_dict, dict):
+        result_dict["raw_payloads"] = raw_payloads
+    # ===========================================
+
+    return result_dict

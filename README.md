@@ -11,8 +11,13 @@
 
 ---
 
-## Quick Start (Backend)
-
+## Quick Start (后端)
+- 先官网下载docker desktop：https://www.docker.com/，然后启动docker desktop，左下角出现绿色Engine running，说明启动成功
+- 然后进入终端，在根目录下输入，这样就能抓取数据，让postgres数据库进入docker容器中
+```bash
+docker compose -f docker-compose.db.yml up -d
+```
+- 然后启动后端服务
 ```bash
 cd backend
 python -m venv .venv
@@ -22,6 +27,17 @@ python -m pip install -U pip setuptools wheel
 pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+## Quick Start (前端)
+- 先下载react
+```bash
+npm create vite@latest ui-react -- --template react
+```
+然后进入ui-react文件夹，安装依赖
+```bash
+cd ui-react
+npm install
+```
+
 
 - 后端启动:
 ```bash
@@ -34,7 +50,7 @@ uvicorn app.main:app --reload
 cd ui-react
 npm run dev 
 ```
--http://127.0.0.1:5173/
+- http://127.0.0.1:5173/
 ---
 
 ## Project Structure

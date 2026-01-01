@@ -12,7 +12,6 @@ from app.registry import METRIC_FILES, SUPPORTED_METRICS, normalize_metrics, ens
 router = APIRouter(prefix="/api", tags=["metrics"])
 
 
-
 def _add_months(value: date, months: int) -> date:
     year = value.year + (value.month - 1 + months) // 12
     month = (value.month - 1 + months) % 12 + 1
@@ -26,16 +25,15 @@ def etl_fetch(
     metrics: list[str] | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    """Fetch metrics from OpenDigger and upsert into MetricPoint table.
+    """从 OpenDigger 抓取指标并将其所有的历史数据持久化到 MetricPoint 表中。
 
-    Supports both:
-      - /etl/fetch?repo=owner/repo&metrics=openrank&metrics=activity
-      - /etl/fetch?repo=owner/repo&metrics=openrank,activity
+    如果未指定 metrics 参数，默认抓取所有支持的指标 (SUPPORTED_METRICS)。
     """
     if "/" not in repo:
         raise HTTPException(status_code=400, detail="repo must be in owner/repo format")
 
-    metrics_list = normalize_metrics(metrics, default=["openrank", "activity", "attention"])
+    # 【修改点1】将默认值改为 SUPPORTED_METRICS，实现“不传参即全量抓取”
+    metrics_list = normalize_metrics(metrics, default=SUPPORTED_METRICS)
     try:
         ensure_supported(metrics_list)
     except ValueError as exc:
@@ -43,11 +41,19 @@ def etl_fetch(
 
     owner, name = repo.split("/", 1)
     client = OpenDiggerClient()
+    
+    # 【修改点2】增加计数器
+    count_new = 0
+    count_updated = 0
+
     for m in metrics_list:
         mf = METRIC_FILES.get(m)
         if not mf:
             continue
+        
+        # 获取该指标所有历史月份的数据
         recs = client.fetch_metric(owner, name, mf)
+        
         for r in recs:
             row = (
                 db.query(MetricPoint)
@@ -58,12 +64,28 @@ def etl_fetch(
                 )
                 .first()
             )
+            
             if row:
+                # 更新已有数据（防止历史数据修正）
                 row.value = r.value
+                count_updated += 1
             else:
+                # 插入新历史数据
                 db.add(MetricPoint(repo=repo, metric=m, dt=r.date, value=r.value))
+                count_new += 1
+                
     db.commit()
-    return {"ok": True, "repo": repo, "metrics": metrics_list}
+    
+    # 【修改点3】返回统计信息，便于调试
+    return {
+        "ok": True, 
+        "repo": repo, 
+        "metrics_count": len(metrics_list),
+        "summary": {
+            "new_records": count_new,
+            "updated_records": count_updated
+        }
+    }
 
 
 @router.get("/metrics/trend")

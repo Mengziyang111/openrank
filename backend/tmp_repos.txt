@@ -1,0 +1,6 @@
+kubernetes/kubernetes
+odoo/odoo
+ossf/scorecard
+pytorch/pytorch
+vuejs/core
+X-lab2017/open-digger

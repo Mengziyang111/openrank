@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
+import base64
+import json
+from fastapi import HTTPException
+
 from app.services.bootstrap_service import STANDARD_TABLES, bootstrap_dashboard, build_table_data
+from app.core.config import settings
 
 router = APIRouter(prefix="/api/dataease", tags=["dataease"])
 
@@ -40,3 +45,22 @@ def bootstrap(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result
+
+
+@router.get("/dashboard-url")
+def dashboard_url(
+    repo: str = Query(..., description="owner/repo"),
+    screen_id: str | None = Query(None, description="override screen id; default from settings"),
+    base_url: str | None = Query(None, description="override public base url; default from settings"),
+):
+    sid = screen_id or settings.DATAEASE_PUBLIC_SCREEN_ID
+    if not sid:
+        raise HTTPException(status_code=400, detail="DATAEASE_PUBLIC_SCREEN_ID not set")
+    base = (base_url or settings.DATAEASE_PUBLIC_BASE_URL or settings.DATAEASE_BASE_URL or "").rstrip("/")
+    if not base:
+        raise HTTPException(status_code=400, detail="DATAEASE_PUBLIC_BASE_URL or DATAEASE_BASE_URL not set")
+
+    payload = {"repo_full_name": repo}
+    encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode()).decode()
+    url = f"{base}/#/de-link/{sid}?attachParams={encoded}"
+    return {"repo": repo, "screen_id": sid, "base_url": base, "attach_params": payload, "dashboard_url": url}

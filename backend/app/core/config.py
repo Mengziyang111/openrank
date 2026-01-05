@@ -9,10 +9,13 @@ class Settings(BaseSettings):
     DATAEASE_USERNAME: str | None = None
     DATAEASE_PASSWORD: str | None = None
     DATAEASE_FEED_BASE_URL: str | None = None
-    DATAEASE_EMBED_APP_ID: str | None = None
-    DATAEASE_EMBED_APP_SECRET: str | None = None
+    DATAEASE_PUBLIC_BASE_URL: str | None = None
+    DATAEASE_PUBLIC_SCREEN_ID: str | None = None
     GITHUB_TOKEN: str | None = None
     MAXKB_BASE_URL: str | None = None
+    MAXKB_CHAT_URL: str | None = None
+    MAXKB_API_KEY: str | None = None
+    MAXKB_MODEL: str | None = None
     LLM_BASE_URL: str | None = None
     LLM_API_KEY: str | None = None
 

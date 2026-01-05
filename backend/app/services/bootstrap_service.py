@@ -64,8 +64,6 @@ def _client() -> DataEaseAdminClient:
         base_url=settings.DATAEASE_BASE_URL,
         username=settings.DATAEASE_USERNAME,
         password=settings.DATAEASE_PASSWORD,
-        embed_app_id=settings.DATAEASE_EMBED_APP_ID,
-        embed_app_secret=settings.DATAEASE_EMBED_APP_SECRET,
     )
 
 
@@ -225,7 +223,8 @@ def bootstrap_dashboard(db: Session, repo: str, window_days: int = 90, force: bo
         screen = client.create_screen(
             name=f"{repo} 健康总览", dataset_ids=list(datasets.values()), description="Auto-created by bootstrap"
         )
-        embed_url = client.build_embed_url(screen_id=screen.id, repo=repo, time_window=window_days)
+        attach_params = {"repo": repo, "window": window_days}
+        embed_url = client.build_embed_url(screen_id=screen.id, attach_params=attach_params)
     except DataEaseError as exc:
         raise ValueError(f"DataEase API error: {exc}") from exc
 

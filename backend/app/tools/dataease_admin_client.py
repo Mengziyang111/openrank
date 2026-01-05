@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import time
+import base64
+import json
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional
 
 import httpx
-import jwt
 
 
 class DataEaseError(RuntimeError):
@@ -38,15 +38,11 @@ class DataEaseAdminClient:
         base_url: str,
         username: str,
         password: str,
-        embed_app_id: str | None = None,
-        embed_app_secret: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
-        self.embed_app_id = embed_app_id
-        self.embed_app_secret = embed_app_secret
         self.client = httpx.Client(base_url=self.base_url, timeout=timeout)
         self._token: str | None = None
 
@@ -159,20 +155,8 @@ class DataEaseAdminClient:
     def build_embed_url(
         self,
         screen_id: str,
-        repo: str,
-        time_window: int,
-        extra_params: Mapping[str, Any] | None = None,
-        expires_in: int = 3600,
+        attach_params: Mapping[str, Any],
     ) -> str:
-        params: Dict[str, Any] = {"repo": repo, "window": time_window}
-        if extra_params:
-            params.update(extra_params)
-
-        if self.embed_app_id and self.embed_app_secret:
-            now = int(time.time())
-            payload = {"iss": self.embed_app_id, "iat": now, "exp": now + expires_in, "params": params}
-            token = jwt.encode(payload, self.embed_app_secret, algorithm="HS256")
-            return f"{self.base_url}/#/bi/embed?screenId={screen_id}&token={token}"
-
-        query = "&".join([f"{k}={v}" for k, v in params.items()])
-        return f"{self.base_url}/#/screenView?screenId={screen_id}&{query}"
+        raw = json.dumps(dict(attach_params), ensure_ascii=False)
+        encoded = base64.b64encode(raw.encode()).decode()
+        return f"{self.base_url}/#/screenView?screenId={screen_id}&attachParams={encoded}"

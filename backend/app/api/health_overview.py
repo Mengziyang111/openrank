@@ -2,13 +2,20 @@ from __future__ import annotations
 
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
-from app.db.models import HealthOverviewDaily
+from app.db.models import HealthOverviewDaily, MetricPoint, RepoCatalog
 from app.schemas.requests import HealthIngestRequest
 from app.services.health_refresh import refresh_health_overview
 from app.services.metric_engine import MetricEngine
+from app.registry import METRIC_FILES, ensure_supported
+from scripts.etl import (
+    fetch_metrics as etl_fetch_metrics,
+    backfill_health_overview as etl_backfill_ho,
+    sync_repo_table as etl_sync_repo_table,
+)
 
 router = APIRouter(prefix="/api/health", tags=["health_overview"])
 
@@ -46,6 +53,46 @@ def refresh(
     except Exception as exc:  # pragma: no cover - network or third-party failures
         raise HTTPException(status_code=502, detail=f"refresh failed: {exc}") from exc
     return {"data": data}
+
+
+@router.post("/refresh-today")
+def refresh_today(db: Session = Depends(get_db)):
+    """Fetch today's snapshot for all repos.
+
+    Previously只刷新 health_overview_daily 里已有的仓库，导致新仓库永远刷不到今天的数据。
+    这里改成合并 health_overview_daily 和 metric_points 的去重列表，确保只要抓取过指标就会刷新。
+    """
+
+    today = date.today()
+
+    ho_repos = db.execute(select(HealthOverviewDaily.repo_full_name).distinct()).scalars().all()
+    mp_repos = db.execute(select(MetricPoint.repo).distinct()).scalars().all()
+    rc_repos = db.execute(select(RepoCatalog.repo).distinct()).scalars().all()
+    repos = sorted(set(ho_repos) | set(mp_repos) | set(rc_repos))
+
+    if not repos:
+        raise HTTPException(status_code=404, detail="no repos found in health_overview_daily or metric_points")
+
+    successes: list[dict] = []
+    failures: list[dict] = []
+
+    for repo in repos:
+        try:
+            payload = refresh_health_overview(db, repo, dt_value=today)
+            dt_value = payload.get("dt") if isinstance(payload, dict) else today.isoformat()
+            successes.append({"repo": repo, "dt": dt_value})
+        except Exception as exc:  # pragma: no cover - network or third-party failures
+            db.rollback()
+            failures.append({"repo": repo, "error": str(exc)})
+
+    return {
+        "data": {
+            "date": today.isoformat(),
+            "total_repos": len(repos),
+            "succeeded": len(successes),
+            "failed": failures,
+        }
+    }
 
 
 @router.post("/backfill")
@@ -118,6 +165,46 @@ def latest_overview(repo_full_name: str = Query(..., description="owner/repo"), 
     if not row:
         raise HTTPException(status_code=404, detail="no snapshot found")
     return {"data": _serialize(row)}
+
+
+@router.post("/bootstrap")
+def bootstrap_repo(
+    repo_full_name: str = Query(..., description="owner/repo"),
+    metrics: str | None = Query("all", description="comma-separated metrics or 'all'"),
+    limit_months: int | None = Query(None, description="limit months for backfill (optional)"),
+    db: Session = Depends(get_db),
+):
+    """One-shot: fetch all historical metrics, backfill HO, sync per-repo table, and refresh latest snapshot.
+
+    Returns a summary including ETL counts and the latest snapshot payload.
+    """
+    # Resolve metrics
+    metric_list = list(METRIC_FILES.keys()) if (metrics or "").lower() == "all" else [m.strip() for m in (metrics or "").split(",") if m.strip()]
+    ensure_supported(metric_list)
+
+    # 1) ETL: fetch historical OpenDigger metrics into metric_points
+    etl_counts = etl_fetch_metrics(repo_full_name, metric_list)
+
+    # 2) Backfill health_overview_daily from metric_points
+    ho_snapshots = etl_backfill_ho(repo_full_name, metric_list, limit_months=limit_months)
+
+    # 3) Sync per-repo materialized table
+    etl_sync_repo_table(repo_full_name, metric_list)
+    sanitized = repo_full_name.replace('/', '_')
+    table_name = f"repo_{sanitized}"
+
+    # 4) Refresh latest snapshot with governance + scorecard + raw_payloads
+    latest_payload = refresh_health_overview(db, repo_full_name, dt_value=None)
+
+    return {
+        "data": {
+            "repo": repo_full_name,
+            "etl_counts": etl_counts,
+            "ho_backfilled": ho_snapshots,
+            "per_repo_table": table_name,
+            "latest": latest_payload,
+        }
+    }
 
 
 @router.get("/overview/by-date")

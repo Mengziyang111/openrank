@@ -118,8 +118,8 @@ def run(req: ChatRequest, intent: dict, db: Session) -> OutputSchema:
             ActionItem(action="Review recent contributor and issue activity", priority="P1")
         )
     links: list[str] = []
-    if settings.DATAEASE_BASE_URL:
-        links.append(build_dashboard_link(settings.DATAEASE_BASE_URL, repo))
+    if settings.DATAEASE_PUBLIC_BASE_URL or settings.DATAEASE_BASE_URL:
+        links.append(build_dashboard_link(settings.DATAEASE_PUBLIC_BASE_URL or settings.DATAEASE_BASE_URL, repo))
 
     output = OutputSchema(
         request_id=f"req_{uuid4().hex}",

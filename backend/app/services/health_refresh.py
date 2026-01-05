@@ -207,14 +207,7 @@ def refresh_health_overview(db: Session, repo: str, dt_value: dt.date | None = N
 
     # Prefer aligning to latest monthly snapshot from metric_points when available
     if dt_value is None:
-        latest_dt = (
-            db.query(MetricPoint.dt)
-            .filter(MetricPoint.repo == repo)
-            .order_by(MetricPoint.dt.desc())
-            .limit(1)
-            .scalar()
-        )
-        dt_value = latest_dt or dt.date.today()
+        dt_value = dt.date.today()
     
     # 1. 抓取 OpenDigger 数据 (raw_payloads 的来源)
     fetched = fetch_opendigger_metrics(db, repo)

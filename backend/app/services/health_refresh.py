@@ -118,12 +118,16 @@ def fetch_github_governance(repo: str) -> Tuple[Dict[str, Any], float | None]:
 
 def fetch_scorecard(repo: str) -> Tuple[float | None, Dict[str, Any], bool]:
     url = f"https://api.securityscorecards.dev/projects/github.com/{repo}"
-    with httpx.Client(timeout=15.0, verify=False) as client:
-        resp = client.get(url)
-        if resp.status_code == 404:
-            return None, {}, True
-        resp.raise_for_status()
-        payload = resp.json()
+    try:
+        with httpx.Client(timeout=20.0, verify=False) as client:
+            resp = client.get(url)
+            if resp.status_code == 404:
+                return None, {}, True
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.HTTPError:
+        # Scorecard 偶发超时/5xx 时降级返回默认值，避免整条链路 500
+        return None, {}, True
     score = payload.get("score")
     checks_payload = payload.get("checks") or []
     checks: Dict[str, Any] = {

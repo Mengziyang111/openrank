@@ -8,7 +8,9 @@ from app.api import (
     forecast,  # 预测模块
     monitor,   # 监控模块
     portfolio, # 项目组合模块
-    iot_api    # 你刚创建的 IoTDB 适配器
+    iot_api,   # 你刚创建的 IoTDB 适配器
+    newcomer,
+    trends,    # 趋势分析模块
 )
 
 api_router = APIRouter()
@@ -29,3 +31,5 @@ api_router.include_router(chat.router)
 api_router.include_router(forecast.router)
 api_router.include_router(monitor.router)
 api_router.include_router(portfolio.router)
+api_router.include_router(newcomer.router)
+api_router.include_router(trends.router)

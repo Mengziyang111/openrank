@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     Text,
     Date,
     Float,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     func,
     JSON,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from app.db.base import Base
@@ -160,14 +162,85 @@ class Alert(Base):
 
 class RepoCatalog(Base):
     __tablename__ = "repo_catalog"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    repo = Column(Text, nullable=False, unique=True, index=True)
-    domain = Column(Text)
-    language = Column(Text)
-    tags_json = Column(JSONType)
-    difficulty = Column(Integer)
-    tech_family = Column(Text)
-    notes = Column(Text)
+
+    repo_full_name = Column(Text, primary_key=True)
+
+    description = Column(Text)
+    homepage = Column(Text)
+    primary_language = Column(Text)
+    topics = Column(JSONType)
+    default_branch = Column(Text)
+    license = Column(Text)
+    stars = Column(Integer)
+    forks = Column(Integer)
+    open_issues_count = Column(Integer)
+    pushed_at = Column(TIMESTAMP)
+
+    domains = Column(JSONType)
+    stacks = Column(JSONType)
+    tags = Column(JSONType)
+
+    seed_domain = Column(Text)
+    fetched_at = Column(TIMESTAMP)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_repo_catalog_seed_domain", seed_domain),
+        Index("idx_repo_catalog_lang", primary_language),
+        Index("idx_repo_catalog_topics_gin", topics, postgresql_using="gin"),
+        Index("idx_repo_catalog_domains_gin", domains, postgresql_using="gin"),
+        Index("idx_repo_catalog_tags_gin", tags, postgresql_using="gin"),
+    )
+
+
+class RepoIssue(Base):
+    __tablename__ = "repo_issues"
+
+    repo_full_name = Column(Text, primary_key=True)
+    github_issue_id = Column(BigInteger, primary_key=True)
+    number = Column(Integer, nullable=False)
+
+    url = Column(Text)
+    title = Column(Text)
+    body = Column(Text)
+    state = Column(Text)
+    is_pull_request = Column(Boolean, default=False)
+
+    labels = Column(JSONType)
+    author_login = Column(Text)
+    author_association = Column(Text)
+    comments = Column(Integer)
+
+    created_at = Column(TIMESTAMP)
+    updated_at = Column(TIMESTAMP)
+
+    category = Column(Text)
+    difficulty = Column(Text)
+
+    fetched_at = Column(TIMESTAMP)
+    raw = Column(JSONType)
+
+    __table_args__ = (
+        Index("idx_repo_issues_repo_cat", repo_full_name, category),
+        Index("idx_repo_issues_updated", updated_at.desc()),
+        Index("idx_repo_issues_labels_gin", labels, postgresql_using="gin"),
+    )
+
+
+class RepoDoc(Base):
+    __tablename__ = "repo_docs"
+
+    repo_full_name = Column(Text, primary_key=True)
+    path = Column(Text, primary_key=True)
+    sha = Column(Text)
+    content = Column(Text)
+    extracted = Column(JSONType)
+    fetched_at = Column(TIMESTAMP)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_repo_docs_repo", repo_full_name),
+    )
 
 
 class DataEaseBinding(Base):

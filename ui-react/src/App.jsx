@@ -1,28 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { marked } from 'marked';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './App.css';
+import TrendMonitor from './pages/TrendMonitor';
 import {
   postAgentRun,
   refreshTodayHealth,
+  refreshHealth,
   fetchLatestHealthOverview,
   fetchDataEaseDashboardUrl,
   fetchTrend,
+  bootstrapHealth,
+  postNewcomerPlan,
 } from './service/api';
 
 const navItems = [
   { key: 'ai', label: 'AI 聊天', note: '主界面' },
   { key: 'health', label: '健康体检', note: '健康分与雷达' },
-  { key: 'benchmark', label: '对标分析', note: '同类分位' },
-  { key: 'trend', label: '趋势预测', note: '趋势预估' },
+  { key: 'benchmark', label: '开源新人', note: '贡献导航' },
+  { key: 'trend', label: '趋势监控', note: '趋势解读' },
   { key: 'actions', label: '行动中心', note: '治理清单' },
   { key: 'alerts', label: '风险预警', note: '实时提示' },
 ];
 
 const conversations = [
   { id: 'conv-1', repo: 'microsoft/vscode', tag: '默认' },
-  { id: 'conv-2', repo: 'facebook/react', tag: '示例' },
-  { id: 'conv-3', repo: 'vuejs/core', tag: '示例' },
 ];
 
 const quickPrompts = [
@@ -138,6 +142,20 @@ function App() {
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState('microsoft/vscode');
+  const [domain, setDomain] = useState('Web前端');
+  const [stack, setStack] = useState('JavaScript/TypeScript');
+  const [timePerWeek, setTimePerWeek] = useState('1-2小时/周');
+  const [keywords, setKeywords] = useState('');
+  const [plan, setPlan] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState('');
+  const [activeTaskTab, setActiveTaskTab] = useState('good_first_issue');
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+  
+  // 添加调试信息，监听selectedRepo变化
+  useEffect(() => {
+    console.log('selectedRepo变化:', selectedRepo);
+  }, [selectedRepo]);
   const [activeNav, setActiveNav] = useState('ai');
   const [healthOverview, setHealthOverview] = useState(null);
   const [healthMarkdown, setHealthMarkdown] = useState('');
@@ -148,15 +166,29 @@ function App() {
   const [linkError, setLinkError] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
   const [copyTip, setCopyTip] = useState('');
+  const [repoSearch, setRepoSearch] = useState('');
+  const [repoActionMsg, setRepoActionMsg] = useState('');
+  const [etlLoading, setEtlLoading] = useState(false);
+  const [refreshOneLoading, setRefreshOneLoading] = useState(false);
   const [showTrendModal, setShowTrendModal] = useState(false);
   const [activeMetric, setActiveMetric] = useState(null);
   const [trendSeries, setTrendSeries] = useState([]);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendError, setTrendError] = useState('');
+  const [historyRepos, setHistoryRepos] = useState([{ id: 'hist-1', repo: 'microsoft/vscode', tag: '历史' }]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const listEndRef = useRef(null);
   const trendChartRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
   const attachParams = useMemo(() => (selectedRepo ? buildAttachParams(selectedRepo) : ''), [selectedRepo]);
+
+  const filteredRepos = useMemo(() => {
+    const term = repoSearch.trim().toLowerCase();
+    let allRepos = [...historyRepos];
+    if (!term) return allRepos;
+    return allRepos.filter((c) => c.repo.toLowerCase().includes(term) || (c.tag || '').toLowerCase().includes(term));
+  }, [repoSearch, historyRepos]);
 
   const currentScore = useMemo(() => {
     const raw = healthOverview?.score_health ?? healthSnapshot.score;
@@ -455,6 +487,9 @@ function App() {
     const trimmed = input.trim();
     if (!trimmed || sending) return;
 
+    // 添加调试信息，确保selectedRepo被正确设置
+    console.log('发送消息，当前仓库:', selectedRepo);
+
     const userMessage = { id: `${Date.now()}-u`, role: 'user', text: trimmed };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
@@ -463,11 +498,15 @@ function App() {
     try {
       const res = await postAgentRun({
         query: trimmed,
-        selected_repo: selectedRepo || null,
-        messages: [],
+        selected_repo: selectedRepo,
+        // 传递完整的历史消息，确保上下文正确
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.text
+        })),
       });
 
-      const reply =
+      const reply = 
         res?.report?.text ||
         formatAssistantReply(res?.tool_results?.length ? res : null) ||
         '已处理，稍后再试试。';
@@ -487,8 +526,22 @@ function App() {
     setInput(prompt);
   };
 
+  const addToHistory = (repo) => {
+    if (!repo) return;
+    setHistoryRepos(prev => {
+      // 检查是否已存在，避免重复
+      if (prev.some(item => item.repo === repo)) {
+        // 如果已存在，移到最前面
+        return [{ id: `hist-${Date.now()}`, repo, tag: '历史' }, ...prev.filter(item => item.repo !== repo)];
+      }
+      // 否则添加到最前面，最多保留10条
+      return [{ id: `hist-${Date.now()}`, repo, tag: '历史' }, ...prev.slice(0, 9)];
+    });
+  };
+
   const handleSelectConversation = (repo) => {
     setSelectedRepo(repo);
+    addToHistory(repo);
   };
 
   const handleNavClick = (key) => {
@@ -513,6 +566,47 @@ function App() {
       setRefreshing(false);
     }
   };
+
+  const currentRepoInput = useMemo(() => repoSearch.trim() || selectedRepo, [repoSearch, selectedRepo]);
+
+  const handleEtlRepo = useCallback(async () => {
+    const repo = currentRepoInput;
+    if (!repo) {
+      setRepoActionMsg('请输入或选择仓库');
+      return;
+    }
+    setEtlLoading(true);
+    setRepoActionMsg('');
+    try {
+      const res = await bootstrapHealth(repo);
+      setRepoActionMsg(`已拉取历史指标：${res?.data?.repo || repo}`);
+      setSelectedRepo(repo);
+    } catch (err) {
+      setRepoActionMsg(err?.message || '拉取失败');
+    } finally {
+      setEtlLoading(false);
+    }
+  }, [currentRepoInput]);
+
+  const handleRefreshRepo = useCallback(async () => {
+    const repo = currentRepoInput;
+    if (!repo) {
+      setRepoActionMsg('请输入或选择仓库');
+      return;
+    }
+    setRefreshOneLoading(true);
+    setRepoActionMsg('');
+    try {
+      const res = await refreshHealth(repo);
+      const dtValue = res?.data?.dt || res?.data?.date || 'today';
+      setRepoActionMsg(`已刷新 ${repo} - ${dtValue}`);
+      setSelectedRepo(repo);
+    } catch (err) {
+      setRepoActionMsg(err?.message || '刷新失败');
+    } finally {
+      setRefreshOneLoading(false);
+    }
+  }, [currentRepoInput]);
 
   const loadTrend = useCallback(
     async (metric) => {
@@ -548,6 +642,97 @@ function App() {
     [selectedRepo],
   );
 
+  const handleGeneratePlan = useCallback(async () => {
+    setPlanLoading(true);
+    setPlanError('');
+    try {
+      const res = await postNewcomerPlan({
+        domain,
+        stack,
+        time_per_week: timePerWeek,
+        keywords,
+      });
+      setPlan(res);
+      setActiveTaskTab('good_first_issue');
+      setPlanModalOpen(true);
+      return res;
+    } catch (err) {
+      setPlan(null);
+      setPlanError(err?.message || '生成失败，请稍后再试');
+      return null;
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [domain, stack, timePerWeek, keywords]);
+
+  const handleShowRoute = useCallback(async () => {
+    if (!plan) {
+      const res = await handleGeneratePlan();
+      if (!res) return;
+    }
+    setPlanModalOpen(true);
+  }, [handleGeneratePlan, plan]);
+
+  const handleClaimFirstTask = useCallback(async () => {
+    const currentPlan = plan || (await handleGeneratePlan());
+    const list = currentPlan?.tasks?.[activeTaskTab] || [];
+    if (!list.length) {
+      setPlanError('暂无可领取的任务');
+      return;
+    }
+    const first = list[0];
+    if (first?.url) {
+      window.open(first.url, '_blank', 'noopener');
+    }
+  }, [activeTaskTab, handleGeneratePlan, plan]);
+
+  const handleCopyPlanSteps = useCallback(async () => {
+    const currentPlan = plan || (await handleGeneratePlan());
+    const markdown = currentPlan?.default_steps?.copy_markdown;
+    if (!markdown) {
+      setPlanError('暂无可复制的步骤');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(markdown);
+    } catch (err) {
+      setPlanError(err?.message || '复制失败');
+    }
+  }, [handleGeneratePlan, plan]);
+
+  const planSummary = useMemo(() => {
+    if (!plan?.repos?.length) return '';
+    const top = plan.repos[0];
+    const reasons = top.reasons || [];
+    const ds = plan.default_steps || {};
+    const pr = ds.pr_steps && ds.pr_steps.length ? ds.pr_steps : ['按 Fork→Clone→Build→PR→Review→Merge 路径执行'];
+    const trend = typeof top.trend_30d_percent === 'number' ? `${top.trend_30d_percent >= 0 ? '+' : ''}${top.trend_30d_percent}%` : '';
+    const health = top.scores?.health !== undefined ? Math.round(top.scores.health) : undefined;
+    const resp = top.scores?.resp !== undefined ? Math.round(top.scores.resp) : undefined;
+    const domain = top.domain || top.tech_family || top.primary_language || '目标领域';
+    const pain = reasons[0] || '典型业务痛点';
+    const tech = top.primary_language || top.language || '核心技术栈';
+
+    return [
+      '## 推荐仓库',
+      `- 仓库：${top.repo_full_name || top.name || ''}`,
+      `- 匹配度：${top.match_percent ?? '--'}%` + (health !== undefined ? ` ｜ 健康度：${health}分` : '') + (trend ? ` ｜ 近30天活跃：${trend}` : ''),
+      resp !== undefined ? `- 维护者响应：${resp}分` : null,
+      '',
+      '## 推荐理由',
+      `- 💡 项目定位：这个项目在 ${domain} 中处于活跃地位，主要解决了 ${pain}，用于快速落地与实践。`,
+      `- 🎯 推荐逻辑：基于你的技能匹配度（${top.match_percent ?? '--'}%）与技术栈 ${tech}，这个项目能让你在 ${domain} 方向获得实战。`,
+      `- 📈 成长阶梯：1) 熟悉工程规范；2) 掌握 ${tech} 核心技术；3) 建立 ${domain} 社区联系。`,
+      '',
+      '## PR Checklist',
+      ...pr.map((s) => `- ${s}`),
+      ds.notes ? `
+> ${ds.notes}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }, [plan]);
+
   const handleMetricClick = (metric) => {
     setActiveMetric(metric);
     setShowTrendModal(true);
@@ -567,6 +752,11 @@ function App() {
   const handleCloseTrend = () => {
     setShowTrendModal(false);
     setTrendError('');
+  };
+
+  // 全屏切换函数
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
   };
 
   const renderPageContent = () => {
@@ -593,7 +783,7 @@ function App() {
                 <div className="gauge-panel">
                   <div className="chart-title">健康总分</div>
                   <div className="gauge-box">
-                    <ReactECharts option={healthGaugeOption} style={{ height: 260, width: '100%' }} />
+                    <ReactECharts option={healthGaugeOption} opts={{ useResizeObserver: false }} style={{ height: 260, width: '100%' }} />
                   </div>
                   <div className="legend-row legend-compact">
                     <span className="legend-dot green" /> 绿 ≥85
@@ -608,7 +798,7 @@ function App() {
                     {healthLoading ? (
                       <div className="loading-text">雷达图加载中...</div>
                     ) : (
-                      <ReactECharts option={healthRadarOption} style={{ height: 360 }} />
+                      <ReactECharts option={healthRadarOption} opts={{ useResizeObserver: false }} style={{ height: 360 }} />
                     )}
                   </div>
                 </div>
@@ -616,7 +806,7 @@ function App() {
             </div>
 
             <div className="export-hero-card">
-              <div className="export-hero-text">已根据当前仓库配置动态生成 attachParams 参数</div>
+
               {!dataEaseLink ? (
                 <button
                   className={`export-main-btn ${linkLoading ? 'loading' : ''}`}
@@ -700,7 +890,7 @@ function App() {
                 ) : trendError ? (
                   <div className="error-row">{trendError}</div>
                 ) : trendSeries.length ? (
-                  <ReactECharts ref={trendChartRef} option={trendOption} style={{ height: 360 }} />
+                  <ReactECharts ref={trendChartRef} option={trendOption} opts={{ useResizeObserver: false }} style={{ height: 360 }} />
                 ) : (
                   <div className="loading-text">暂无趋势数据</div>
                 )}
@@ -714,42 +904,299 @@ function App() {
     }
 
     if (activeNav === 'benchmark') {
+      const interestAreas = ['Web前端', '后端/企业应用', '移动开发', '云原生/基础设施', 'AI/深度学习', '安全/合规', '开源生态分析', '文档', '翻译'];
+      const skillStacks = ['JavaScript/TypeScript', 'Python', 'Go', 'Java', 'Rust'];
+      const timeCommits = ['1-2小时/周', '3-5小时/周', '5-10小时/周', '10+小时/周'];
+
+      const fallbackProjects = [
+        { repo_full_name: 'microsoft/vscode', match_percent: 95, difficulty: 'Easy', activity_percent: 98, maintainer_response_percent: 92, trend_30d_percent: 12, description: 'Visual Studio Code - 开源代码编辑器' },
+        { repo_full_name: 'facebook/react', match_percent: 92, difficulty: 'Medium', activity_percent: 99, maintainer_response_percent: 89, trend_30d_percent: 8, description: 'React - JavaScript 库，用于构建用户界面' },
+        { repo_full_name: 'vuejs/core', match_percent: 90, difficulty: 'Easy', activity_percent: 97, maintainer_response_percent: 94, trend_30d_percent: 15, description: 'Vue.js - 渐进式 JavaScript 框架' },
+        { repo_full_name: 'python/cpython', match_percent: 88, difficulty: 'Medium', activity_percent: 96, maintainer_response_percent: 85, trend_30d_percent: 5, description: 'Python 解释器' },
+      ];
+
+      const cards = (plan?.repos?.length ? plan.repos : fallbackProjects).map((item, idx) => ({
+        id: idx,
+        name: item.repo_full_name,
+        url: item.url,
+        match: item.match_percent,
+        difficulty: item.difficulty,
+        activity: item.activity_percent,
+        response: item.maintainer_response_percent,
+        trend: `${item.trend_30d_percent >= 0 ? '+' : ''}${item.trend_30d_percent}%`,
+        description: item.description || '点击查看仓库详情',
+        reasons: item.reasons || [],
+      }));
+
+      const fallbackTasks = {
+        good_first_issue: [
+          { title: '修复文档中的拼写错误', repo_full_name: 'microsoft/vscode', difficulty: 'Easy', url: '#' },
+        ],
+        help_wanted: [
+          { title: '添加新的测试用例', repo_full_name: 'facebook/react', difficulty: 'Medium', url: '#' },
+        ],
+        docs: [
+          { title: '更新中文文档', repo_full_name: 'vuejs/core', difficulty: 'Easy', url: '#' },
+        ],
+        translation: [
+          { title: '翻译 README 到日语', repo_full_name: 'python/cpython', difficulty: 'Easy', url: '#' },
+        ],
+      };
+
+      const tasksSource = plan?.tasks || fallbackTasks;
+      const taskTabs = [
+        { key: 'good_first_issue', label: 'Good First Issue' },
+        { key: 'help_wanted', label: 'Help Wanted' },
+        { key: 'docs', label: '文档类任务' },
+        { key: 'translation', label: '翻译类任务' },
+      ];
+
+      const defaultSteps = plan?.default_steps;
+
       return (
-        <div className="analysis-wrapper">
-          <section className="analysis-card">
-            <div className="analysis-head">
-              <div>
-                <div className="eyebrow">对标分析</div>
-                <h2>同类分位与差距归因</h2>
+        <div className="newcomer-wrapper">
+          {/* 入门向导 Hero */}
+          <section className="newcomer-hero">
+            <div className="newcomer-hero-content">
+              <h1>启航入门 · 贡献导航</h1>
+              <p>从“我是谁/我会什么/我想参与什么”出发，给新人一条可执行的贡献路径。</p>
+            </div>
+            
+            {/* 三步入门向导 */}
+            <div className="onboarding-steps">
+              <div className="step-card">
+                <div className="step-number">1</div>
+                <div className="step-title">选择兴趣领域</div>
+                <select
+                  className="step-select"
+                  value={domain}
+                  onChange={(e) => {
+                    setDomain(e.target.value);
+                    setPlan(null);
+                    setPlanModalOpen(false);
+                  }}
+                >
+                  {interestAreas.map((area) => (
+                    <option key={area} value={area}>{area}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="step-card">
+                <div className="step-number">2</div>
+                <div className="step-title">选择技能栈</div>
+                <select
+                  className="step-select"
+                  value={stack}
+                  onChange={(e) => {
+                    setStack(e.target.value);
+                    setPlan(null);
+                    setPlanModalOpen(false);
+                  }}
+                >
+                  {skillStacks.map((skill) => (
+                    <option key={skill} value={skill}>{skill}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="step-card">
+                <div className="step-number">3</div>
+                <div className="step-title">每周可投入时间</div>
+                <select
+                  className="step-select"
+                  value={timePerWeek}
+                  onChange={(e) => {
+                    setTimePerWeek(e.target.value);
+                    setPlan(null);
+                    setPlanModalOpen(false);
+                  }}
+                >
+                  {timeCommits.map((time) => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
               </div>
             </div>
-            <div className="mini-grid">
-              {benchmarkCards.map((c) => (
-                <div key={c.title} className="mini-card">
-                  <div className="mini-card-title">{c.title}</div>
-                  <div className="mini-card-detail">{c.detail}</div>
+
+            {/* 关键 CTA */}
+            <div className="hero-cta-group">
+              <button className="primary-btn large" onClick={handleShowRoute} disabled={planLoading}>
+                {planLoading ? '生成中...' : plan ? '查看项目路线' : '生成项目路线'}
+              </button>
+            </div>
+            {planError && <div className="error-row compact">{planError}</div>}
+          </section>
+          
+          {/* 项目推荐卡片区 */}
+          <section className="newcomer-section">
+            <div className="section-head">
+              <h2>项目推荐</h2>
+              <p>根据你的选择，为你推荐匹配度最高的开源项目</p>
+            </div>
+            
+            <div className="project-cards">
+              {cards.map((project) => (
+                <div key={project.id} className="project-card">
+                  <div className="project-header">
+                    <div className="project-title">{project.name}</div>
+                    <div className="match-badge">匹配度 {project.match}%</div>
+                  </div>
+                  <div className="project-description">{project.description}</div>
+                  <div className="project-metrics">
+                    <div className="metric-item">
+                      <span className="metric-label">上手难度</span>
+                      <span className={`metric-value ${project.difficulty.toLowerCase()}`}>{project.difficulty}</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">活跃度</span>
+                      <span className="metric-value">{project.activity}%</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">维护者响应</span>
+                      <span className="metric-value">{project.response}%</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">近 30 天趋势</span>
+                      <span className="metric-value positive">{project.trend}</span>
+                    </div>
+                  </div>
+                  <div className="project-cta">
+                    <button className="project-btn" onClick={() => project.url && window.open(project.url, '_blank', 'noopener')}>
+                      查看项目
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </section>
+          
+          {/* 新手任务看板 */}
+          <section className="newcomer-section">
+            <div className="section-head">
+              <h2>新手任务看板</h2>
+              <p>从简单任务开始，迈出你的开源贡献第一步</p>
+            </div>
+            
+            <div className="task-board">
+              <div className="task-tabs">
+                {taskTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`task-tab ${activeTaskTab === tab.key ? 'active' : ''}`}
+                    onClick={() => setActiveTaskTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="task-list">
+                {(tasksSource[activeTaskTab] || []).map((task, idx) => (
+                  <div key={`${task.title}-${idx}`} className="task-item">
+                    <div className="task-type-badge">{task.repo_full_name}</div>
+                    <div className="task-content">
+                      <div className="task-title">{task.title}</div>
+                      <div className="task-repo">{task.repo_full_name}</div>
+                      <div className="task-meta">
+                        <span className={`difficulty ${(task.difficulty || 'Medium').toLowerCase()}`}>{task.difficulty || 'Medium'}</span>
+                      </div>
+                    </div>
+                    <div className="task-actions">
+                      <button className="task-btn" onClick={() => task.url && window.open(task.url, '_blank', 'noopener')}>
+                        领取任务
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {!planLoading && !(tasksSource[activeTaskTab] || []).length && (
+                  <div className="loading-text">暂无任务</div>
+                )}
+                {planLoading && <div className="loading-text">任务加载中...</div>}
+              </div>
+            </div>
+          </section>
+          
+          {/* 贡献路径 Timeline */}
+          <section className="newcomer-section">
+            <div className="section-head">
+              <h2>贡献路径 Timeline</h2>
+              <p>从 0 到 1，完整的贡献流程</p>
+            </div>
+            <div className="contribution-timeline">
+              <div className="timeline-column">
+                <div className="timeline-title">PR Checklist</div>
+                <div className="timeline-list">
+                  {(defaultSteps?.pr_steps || ['提交 PR，等待 Review']).map((step, idx) => (
+                    <div key={`pr-${idx}`} className="timeline-row">{step}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+          
+          {/* AI 指导侧栏 */}
+          <section className="ai-guide-section">
+            <div className="ai-guide-card">
+              <div className="ai-guide-header">
+                <h3>「我该怎么做」AI 指导</h3>
+                <div className="ai-icon">🤖</div>
+              </div>
+              
+              <div className="ai-input-group">
+                <textarea 
+                  placeholder="输入一句话，例如：'我会 Python，想做文档贡献'"
+                  className="ai-input"
+                ></textarea>
+                <button className="ai-submit-btn">生成指导</button>
+              </div>
+              
+              <div className="ai-result-preview">
+                <div className="ai-result-title">操作清单 + 指令</div>
+                <div className="ai-result-content">
+                  <p>根据你的输入，AI 将为你生成详细的操作步骤和指令...</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {planModalOpen && (
+            <div className="trend-modal-overlay" onClick={() => setPlanModalOpen(false)}>
+              <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="trend-modal-head">
+                  <div>
+                    <div className="eyebrow">项目路线</div>
+                    <h3>推荐原因 & 行动步骤</h3>
+                  </div>
+                  <button className="ghost-btn" onClick={() => setPlanModalOpen(false)}>关闭</button>
+                </div>
+                {planSummary ? (
+                  <div className="plan-modal-body markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {planSummary}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="loading-text">暂无路线，请先生成。</div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
 
     if (activeNav === 'trend') {
       return (
-        <div className="analysis-wrapper">
-          <section className="analysis-card">
-            <div className="analysis-head">
-              <div>
-                <div className="eyebrow">趋势预测</div>
-                <h2>未来 4 周走势预估</h2>
-              </div>
-              <div className="pill">基于历史指标拟合</div>
-            </div>
-            <div className="trend-placeholder">趋势预测模块待接入模型输出，可在此展示预测曲线与置信区间。</div>
-          </section>
-        </div>
+        <TrendMonitor
+          repo={selectedRepo}
+          onRepoChange={(next) => {
+            setSelectedRepo(next);
+            setRepoSearch(next);
+            addToHistory(next);
+          }}
+          onRepoPinned={addToHistory}
+        />
       );
     }
 
@@ -826,20 +1273,49 @@ function App() {
       </header>
 
       <div className="content-grid">
-        <aside className="nav-rail">
+        <aside className="nav-rail repo-rail">
           <div className="nav-rail-header">
-            <div className="nav-rail-title">OpenRank Agent</div>
-            <div className="nav-rail-sub">开源智能治理台</div>
+            <div className="nav-rail-title">仓库栏</div>
+            <div className="nav-rail-sub">搜索、拉取历史、刷新当日</div>
           </div>
 
-          <button className="nav-new-btn">+ 新对话</button>
+          <div className="repo-search">
+            <label>仓库</label>
+            <input
+              value={repoSearch}
+              onChange={(e) => setRepoSearch(e.target.value)}
+              placeholder="owner/repo"
+            />
+            <button className="repo-use-btn" onClick={() => {
+              const repo = repoSearch || selectedRepo;
+              setSelectedRepo(repo);
+              addToHistory(repo);
+            }}>
+              设为当前
+            </button>
+          </div>
 
-          <div className="nav-rail-group">
-            {conversations.map((c) => (
+          <div className="repo-actions">
+            <button className="mini-btn" onClick={handleEtlRepo} disabled={etlLoading}>
+              {etlLoading ? '拉取中…' : 'ETL 历史'}
+            </button>
+            <button className="mini-btn" onClick={handleRefreshRepo} disabled={refreshOneLoading}>
+              {refreshOneLoading ? '刷新中…' : '刷新当日'}
+            </button>
+          </div>
+          {repoActionMsg && <div className="repo-hint">{repoActionMsg}</div>}
+
+          <div className="nav-rail-group repo-list">
+            {filteredRepos.map((c) => (
               <button
                 key={c.id}
                 className={`nav-conv ${selectedRepo === c.repo ? 'active' : ''}`}
-                onClick={() => handleSelectConversation(c.repo)}
+                onClick={() => {
+                  // 直接更新selectedRepo，确保仓库被正确选中
+                  setSelectedRepo(c.repo);
+                  setRepoSearch(c.repo);
+                  addToHistory(c.repo);
+                }}
               >
                 <div className="nav-conv-title">{c.repo}</div>
                 <div className="nav-conv-note">{c.tag}</div>
@@ -851,46 +1327,125 @@ function App() {
         <main className="chat-column">
           {activeNav === 'ai' ? (
             <>
-              <div className="chat-hero">
-                <div>
-                  <div className="eyebrow">AI Chat · 主工作区</div>
-                  <h1>用对话完成体检、对标、治理和预警</h1>
-                  <p>输入问题或选择提示，Agent 会调用后端 /agent/run 读取真实数据再生成报告。</p>
-                </div>
-                <div className="repo-input-group">
-                  <label>仓库</label>
-                  <input value={selectedRepo} onChange={(e) => setSelectedRepo(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="quick-prompts">
-                {quickPrompts.map((p) => (
-                  <button key={p} className="prompt-chip" onClick={() => handlePromptClick(p)}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-
-              <div className="chat-window">
-                {messages.map((msg) => (
-                  <div key={msg.id} className={`message ${msg.role}`}>
-                    <div className="message-role">{msg.role === 'assistant' ? 'Agent' : '你'}</div>
-                    <div className="message-body">{msg.text}</div>
+              {/* 聊天主区域 - 限制宽度 + 居中 */}
+              <div ref={chatContainerRef} className={`chat-container ${isFullscreen ? 'fullscreen' : ''}`}>
+                {/* 顶部标题栏 - 始终显示 */}
+                <div className="chat-hero-modern">
+                  <div className="chat-hero-header">
+                    <div className="chat-hero-content">
+                      <div className="eyebrow">AI Chat · 主工作区</div>
+                      <h1>用对话完成体检、对标、治理和预警</h1>
+                      <p>输入问题或选择提示，Agent 会调用后端 /agent/run 读取真实数据再生成报告。</p>
+                    </div>
+                    {/* 右上角当前仓库和全屏按钮 */}
+                    <div className="hero-actions">
+                      {/* 当前仓库 */}
+                      <div className="current-repo-badge">
+                        <span className="repo-label">当前仓库:</span>
+                        <span className="repo-value">{selectedRepo}</span>
+                      </div>
+                      {/* 全屏切换按钮 */}
+                      <button 
+                        className="fullscreen-toggle-btn"
+                        onClick={toggleFullscreen}
+                        title={isFullscreen ? '退出全屏' : '全屏'}
+                      >
+                        {isFullscreen ? '⬜' : '⛶'}
+                      </button>
+                    </div>
                   </div>
-                ))}
-                <div ref={listEndRef} />
-              </div>
+                  {/* 快捷提示词 */}
+                  <div className="quick-prompts-inline">
+                    {quickPrompts.map((p) => (
+                      <button key={p} className="prompt-chip-modern" onClick={() => handlePromptClick(p)}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-              <div className="composer">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="问我：体检一下仓库、给出治理建议或生成风险预警"
-                  rows={3}
-                />
-                <button className="primary-btn" onClick={handleSend} disabled={sending || !input.trim()}>
-                  {sending ? '发送中…' : '发送'}
-                </button>
+                {/* 消息列表 */}
+                <div className="chat-window-modern">
+                  {messages.map((msg) => (
+                    <div key={msg.id} className={`message-bubble ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}>
+                      {/* 头像 */}
+                      <div className={`message-avatar ${msg.role === 'user' ? 'avatar-user' : 'avatar-assistant'}`}>
+                        {msg.role === 'assistant' ? '🤖' : '👤'}
+                      </div>
+                      
+                      {/* 消息内容 */}
+                      <div className="message-content-wrapper">
+                        <div className="message-role-label">{msg.role === 'assistant' ? 'OpenRank Agent' : '你'}</div>
+                        <div className={`message-content ${msg.role === 'assistant' ? 'content-assistant' : 'content-user'}`}>
+                          {msg.role === 'assistant' ? (
+                            <div className="markdown-content">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.text}
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <div className="text-content">{msg.text}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {sending && (
+                    <div className="message-bubble message-assistant">
+                      <div className="message-avatar avatar-assistant">🤖</div>
+                      <div className="message-content-wrapper">
+                        <div className="message-role-label">OpenRank Agent</div>
+                        <div className="message-content content-assistant">
+                          <div className="typing-indicator">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={listEndRef} />
+                </div>
+
+                {/* 底部输入区 - 自适应高度 */}
+                <div className="composer-modern">
+                  <div className="composer-wrapper">
+                    <textarea
+                      value={input}
+                      onChange={(e) => {
+                        setInput(e.target.value);
+                        // 自动调整高度，限制最大高度
+                        e.target.style.height = 'auto';
+                        e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                        }
+                      }}
+                      placeholder="问我：体检一下仓库、给出治理建议或生成风险预警..."
+                      className="composer-input"
+                      rows={1}
+                    />
+                    <button 
+                      className="composer-send-btn" 
+                      onClick={handleSend} 
+                      disabled={sending || !input.trim()}
+                      title="发送 (Enter)"
+                    >
+                      {sending ? (
+                        <span className="sending-spinner">⏳</span>
+                      ) : (
+                        <span>➤</span>
+                      )}
+                    </button>
+                  </div>
+                  <div className="composer-footer">
+                    <span className="composer-hint">支持 Markdown 输入 · 按 Enter 发送，Shift+Enter 换行</span>
+                  </div>
+                </div>
               </div>
             </>
           ) : (

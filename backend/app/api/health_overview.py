@@ -67,7 +67,7 @@ def refresh_today(db: Session = Depends(get_db)):
 
     ho_repos = db.execute(select(HealthOverviewDaily.repo_full_name).distinct()).scalars().all()
     mp_repos = db.execute(select(MetricPoint.repo).distinct()).scalars().all()
-    rc_repos = db.execute(select(RepoCatalog.repo).distinct()).scalars().all()
+    rc_repos = db.execute(select(RepoCatalog.repo_full_name).distinct()).scalars().all()
     repos = sorted(set(ho_repos) | set(mp_repos) | set(rc_repos))
 
     if not repos:

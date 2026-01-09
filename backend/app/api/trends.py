@@ -5,12 +5,17 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
 from app.db.models import HealthOverviewDaily
 from app.schemas.requests import TrendReportRequest
+from app.services.composite_metrics import (
+    compute_vitality_series,
+    compute_responsiveness_series,
+    compute_resilience_series,
+)
 
 router = APIRouter(prefix="/trends", tags=["trends"])
 
@@ -114,6 +119,17 @@ def _parse_date_range(start: Optional[str], end: Optional[str], default_days: in
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start date must not be after end date")
     return start_date, end_date
+
+
+def _repo_date_bounds(db: Session, repo: str) -> Tuple[date | None, date | None]:
+    bounds = (
+        db.query(func.min(HealthOverviewDaily.dt), func.max(HealthOverviewDaily.dt))
+        .filter(HealthOverviewDaily.repo_full_name == repo)
+        .one_or_none()
+    )
+    if not bounds:
+        return None, None
+    return bounds[0], bounds[1]
 
 
 def _validate_metrics(metrics: Sequence[str]) -> None:
@@ -226,7 +242,13 @@ def get_trend_series(
     metrics: List[str] = Query(..., description="指标列表，支持重复参数或逗号分隔"),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _parse_date_range(start, end)
+    if not start and not end:
+        min_dt, max_dt = _repo_date_bounds(db, repo)
+        if not min_dt or not max_dt:
+            raise HTTPException(status_code=404, detail="no data for repo")
+        start_date, end_date = min_dt, max_dt
+    else:
+        start_date, end_date = _parse_date_range(start, end)
     metric_list = _normalize_metrics(metrics)
     if not metric_list:
         raise HTTPException(status_code=400, detail="metrics is required")
@@ -255,7 +277,13 @@ def get_derived_metrics(
     response_hours: float = Query(48.0, description="基准内响应占比阈值（小时）"),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _parse_date_range(start, end)
+    if not start and not end:
+        min_dt, max_dt = _repo_date_bounds(db, repo)
+        if not min_dt or not max_dt:
+            raise HTTPException(status_code=404, detail="no data for repo")
+        start_date, end_date = min_dt, max_dt
+    else:
+        start_date, end_date = _parse_date_range(start, end)
     metric_list = _normalize_metrics(metrics)
     if not metric_list:
         raise HTTPException(status_code=400, detail="metrics is required")
@@ -294,9 +322,28 @@ def generate_trend_report(
     db: Session = Depends(get_db),
 ):
     repo = request.repo
-    time_window = int(request.time_window or DEFAULT_RANGE_DAYS)
-    start_date = datetime.utcnow().date() - timedelta(days=time_window)
-    end_date = datetime.utcnow().date()
+    min_dt, max_dt = _repo_date_bounds(db, repo)
+    if not min_dt or not max_dt:
+        raise HTTPException(status_code=404, detail="no data for repo")
+
+    raw_window = request.time_window
+    if isinstance(raw_window, str) and raw_window.lower() == "all":
+        time_window: int | None = None
+    elif raw_window is None:
+        time_window = None
+    else:
+        try:
+            time_window = int(raw_window)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="time_window must be integer days or 'all'")
+        if time_window <= 0:
+            time_window = None
+
+    if time_window is None:
+        start_date, end_date = min_dt, max_dt
+    else:
+        end_date = max_dt
+        start_date = max(min_dt, end_date - timedelta(days=time_window))
 
     metrics = sorted(set(request.key_metrics.keys()) if request.key_metrics else set(SERIES_BASE_METRICS))
     _validate_metrics(metrics)
@@ -310,8 +357,10 @@ def generate_trend_report(
                 value_map[metric].append(val)
 
     derived_map: Dict[str, Dict[str, float | None]] = {}
+    window_days = max((end_date - start_date).days + 1, 1)
+    slope_days = min(30, window_days)
     for metric, values in value_map.items():
-        derived_map[metric] = _compute_derived(values, slope_window=min(14, time_window), response_hours=48 if "response" in metric else None)
+        derived_map[metric] = _compute_derived(values, slope_window=slope_days, response_hours=48 if "response" in metric else None)
         derived_map[metric]["direction"] = _direction_label(derived_map[metric].get("slope"))
         derived_map[metric]["latest"] = _latest(values)
 
@@ -332,8 +381,9 @@ def generate_trend_report(
     def _dir_text(direction: str) -> str:
         return {"rising": "上升", "falling": "下降", "flat": "持平"}.get(direction, "无数据")
 
+    summary_window = window_days if time_window is None else time_window
     summary = (
-        f"最近 {time_window} 天：活跃度{_dir_text(trend_conclusions.get('metric_activity', 'flat'))}，"
+        f"最近 {summary_window} 天：活跃度{_dir_text(trend_conclusions.get('metric_activity', 'flat'))}，"
         f"响应性{_dir_text(trend_conclusions.get('metric_pr_response_time_h', 'flat'))}，"
         f"风险与可持续{_dir_text(trend_conclusions.get('metric_bus_factor', 'flat'))}。"
     )
@@ -376,7 +426,7 @@ def generate_trend_report(
 
     payload = {
         "repo": repo,
-        "time_window": time_window,
+        "time_window": time_window if time_window is not None else summary_window,
         "trend_conclusions": trend_conclusions,
         "derived": derived_map,
         "ratios": {
@@ -402,3 +452,71 @@ def generate_trend_report(
     }
 
     return payload
+
+
+@router.get("/composite")
+def get_composite_series(
+    repo: str = Query(..., description="仓库名称，格式：owner/repo"),
+    start: Optional[str] = Query(None, description="开始日期，格式：YYYY-MM-DD"),
+    end: Optional[str] = Query(None, description="结束日期，格式：YYYY-MM-DD"),
+    window_days: int = Query(180, ge=30, le=720, description="归一化滚动窗口天数"),
+    db: Session = Depends(get_db),
+):
+    if not start and not end:
+        min_dt, max_dt = _repo_date_bounds(db, repo)
+        if not min_dt or not max_dt:
+            raise HTTPException(status_code=404, detail="no data for repo")
+        start_date, end_date = min_dt, max_dt
+    else:
+        start_date, end_date = _parse_date_range(start, end)
+
+    metrics_vitality = ["metric_activity", "metric_openrank", "metric_participants", "metric_attention"]
+    metrics_resp = [
+        "metric_issue_response_time_h",
+        "metric_pr_response_time_h",
+        "metric_issue_resolution_duration_h",
+        "metric_pr_resolution_duration_h",
+    ]
+    metrics_resil = ["metric_bus_factor", "metric_top1_share", "metric_hhi", "metric_retention_rate"]
+
+    rows_v = _query_series(db, repo, metrics_vitality, start_date, end_date)
+    rows_rp = _query_series(db, repo, metrics_resp, start_date, end_date)
+    rows_rs = _query_series(db, repo, metrics_resil, start_date, end_date)
+
+    def pack_rows(raw_rows, keys):
+        out = []
+        for row in raw_rows:
+            payload = {k: row[idx + 1] for idx, k in enumerate(keys)}
+            out.append((row[0], payload))
+        return out
+
+    vitality_series, vitality_explain = compute_vitality_series(pack_rows(rows_v, metrics_vitality), window_days)
+    resp_series, resp_explain = compute_responsiveness_series(pack_rows(rows_rp, metrics_resp), window_days)
+    resil_series, resil_explain = compute_resilience_series(pack_rows(rows_rs, metrics_resil), window_days)
+
+    def kpi(series):
+        vals = [s.get("value") for s in series if s.get("value") is not None]
+        if not vals:
+            return {"value": None, "delta": None}
+        return {"value": vals[-1], "delta": (vals[-1] - vals[0]) if len(vals) >= 2 else None}
+
+    return {
+        "repo": repo,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+        "series": {
+            "vitality_composite": vitality_series,
+            "responsiveness_composite": resp_series,
+            "resilience_composite": resil_series,
+        },
+        "kpis": {
+            "vitality": kpi(vitality_series),
+            "responsiveness": kpi(resp_series),
+            "resilience": kpi(resil_series),
+        },
+        "explain": {
+            "vitality": vitality_explain,
+            "responsiveness": resp_explain,
+            "resilience": resil_explain,
+        },
+    }

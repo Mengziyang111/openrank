@@ -82,32 +82,38 @@ async def run_agent(req: AgentRequest, db=None) -> AgentResponse:
 	# 2. 构建基础用户消息
 	user_msg = Msg(role="user", content=req.query)
 	
-	# 3. 构建系统消息，确保仓库信息被正确传递
-	system_content = "你是OpenRank Agent，负责仓库健康分析。"
+	# 3. 构建系统消息，只传递必要的仓库信息
+	system_content = ""
 	
-	# 4. 如果有仓库，强制使用该仓库
+	# 4. 如果有仓库，传递仓库信息和dashboard链接
+	dashboard_url: Optional[str] = None
 	if repo:
-		# 直接将仓库信息添加到系统消息中，确保AI使用该仓库
-		system_content += f"\n当前使用的仓库是：{repo}。请基于该仓库进行分析，不要询问用户提供仓库。"
+		# 传递仓库信息
+		system_content += f"仓库: {repo}\n"
 		# 构建dashboard链接
-		dashboard_url: Optional[str] = None
 		try:
 			dashboard_url = build_dashboard_link(settings.DATAEASE_PUBLIC_BASE_URL or settings.DATAEASE_BASE_URL, repo)
 			if dashboard_url:
-				system_content += f"\n相关数据大屏链接：{dashboard_url}"
+				system_content += f"数据大屏链接: {dashboard_url}\n"
 		except Exception as e:
 			logger.warning("build_dashboard_link failed: %s", e)
-	else:
-		# 如果没有仓库，提醒用户提供
-		system_content += f"\n请提醒用户提供仓库信息，格式为 owner/repo。"
 	
-	# 5. 构建最终消息列表，系统消息 + 用户消息
-	messages = [
-		Msg(role="system", content=system_content),
-		user_msg
-	]
+	# 5. 构建最终消息列表，只包含相关的历史消息和当前用户消息
+	messages = []
 	
-	# 6. 不再处理前端传递的messages，只使用当前的系统消息和用户消息
+	# 添加历史消息，过滤掉系统消息和初始欢迎消息
+	for msg in req.messages:
+		# 过滤掉系统消息
+		if msg.role == "system":
+			continue
+		# 过滤掉初始欢迎消息
+		if msg.role == "assistant" and "你好，我是 OpenRank Agent" in msg.content:
+			continue
+		messages.append(msg)
+	
+	# 添加当前用户消息
+	messages.append(user_msg)
+	
 	logger.info("构建的消息列表: %s", messages)
 
 	# Prefer request -> .env -> inferred app_id; final fallback uses qwen3-max to match your MaxKB base model
@@ -198,7 +204,7 @@ async def run_agent(req: AgentRequest, db=None) -> AgentResponse:
 
 		tool_results: List[Dict[str, Any]] = []
 		if dashboard_url:
-			tool_results.append({"type": "dashboard_url", "repo": repo_for_link, "url": dashboard_url})
+			tool_results.append({"type": "dashboard_url", "repo": repo, "url": dashboard_url})
 
 		return AgentResponse(report=Report(text=final_text), tool_results=tool_results)
 

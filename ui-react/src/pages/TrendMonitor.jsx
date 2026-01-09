@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { fetchTrendDerived, fetchTrendSeries, postTrendReport } from '../service/api';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { fetchTrendDerived, fetchTrendSeries, postTrendReport, fetchCompositeTrends, fetchRiskViability } from '../service/api';
 
 const OVERVIEW_CARDS = [
   { key: 'metric_activity', title: '活跃度趋势', desc: 'commit / issue / PR 综合活跃' },
@@ -103,21 +105,33 @@ function computeRatio(seriesMap, openKey, closeKey) {
   return totalClose / totalOpen;
 }
 
+const TIME_PRESETS = [
+  { value: 180, label: '180天' },
+  { value: 365, label: '365天' },
+  { value: 'all', label: '全量' },
+];
+
 export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
   const [repoInput, setRepoInput] = useState(repo || '');
-  const [timeRange, setTimeRange] = useState(30);
+  const [timeRange, setTimeRange] = useState(180);
   const [activeTab, setActiveTab] = useState('overview');
   const [series, setSeries] = useState([]);
   const [derived, setDerived] = useState({});
   const [report, setReport] = useState(null);
+  const [composite, setComposite] = useState({ series: null, kpis: null, explain: null });
+  const [riskViability, setRiskViability] = useState({ kpis: null, series: null, explain: null });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [zoomOpen, setZoomOpen] = useState(false);
 
   useEffect(() => {
     setRepoInput(repo || '');
   }, [repo]);
 
   const dateRange = useMemo(() => {
+    if (timeRange === 'all') {
+      return { start: undefined, end: undefined };
+    }
     const end = new Date();
     const start = new Date(end.getTime() - timeRange * 24 * 60 * 60 * 1000);
     const fmt = (d) => d.toISOString().split('T')[0];
@@ -159,15 +173,30 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
     setLoading(true);
     setError('');
     try {
-      const payload = { repo: repoInput, metrics: METRIC_KEYS, start: dateRange.start, end: dateRange.end };
-      const [seriesRes, derivedRes, reportRes] = await Promise.all([
+      const payload = { repo: repoInput, metrics: METRIC_KEYS };
+      if (dateRange.start) payload.start = dateRange.start;
+      if (dateRange.end) payload.end = dateRange.end;
+      const windowDays = timeRange === 'all' ? 180 : Math.max(30, Math.min(180, Number(timeRange) || 180));
+      const [seriesRes, derivedRes, reportRes, compositeRes, riskRes] = await Promise.all([
         fetchTrendSeries(payload),
-        fetchTrendDerived({ ...payload, slope_window: Math.min(14, timeRange) }),
-        postTrendReport({ repo: repoInput, time_window: timeRange }),
+        fetchTrendDerived({ ...payload, slope_window: timeRange === 'all' ? 30 : Math.min(14, timeRange) }),
+        postTrendReport({ repo: repoInput, time_window: timeRange === 'all' ? undefined : timeRange }),
+        fetchCompositeTrends({ repo: repoInput, start: dateRange.start, end: dateRange.end, window_days: windowDays }),
+        fetchRiskViability(repoInput, dateRange.start, dateRange.end)
       ]);
       setSeries(seriesRes.series || seriesRes.data?.series || []);
       setDerived(derivedRes.derived || derivedRes.data?.derived || {});
       setReport(reportRes.report ? reportRes : reportRes.data || reportRes);
+      setComposite({
+        series: compositeRes.series || compositeRes.data?.series,
+        kpis: compositeRes.kpis || compositeRes.data?.kpis,
+        explain: compositeRes.explain || compositeRes.data?.explain,
+      });
+      setRiskViability({
+        kpis: riskRes.kpis || riskRes.data?.kpis,
+        series: riskRes.series || riskRes.data?.series,
+        explain: riskRes.explain || riskRes.data?.explain,
+      });
     } catch (err) {
       setError(err?.message || '加载失败，请稍后再试');
       setSeries([]);
@@ -180,6 +209,38 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const reportMarkdown = useMemo(() => {
+    if (!report?.report) return '';
+    const r = report.report;
+    const lines = [];
+    lines.push('## Identify');
+    if (r.identify) lines.push(r.identify, '');
+
+    lines.push('## Diagnosis');
+    (r.diagnosis || []).forEach((d) => lines.push(`- ${d}`));
+    lines.push('');
+
+    lines.push('## Need Data?');
+    (r.need_data || []).forEach((d) => lines.push(`- ${d}`));
+    lines.push('');
+
+    lines.push('## Improvements');
+    (r.improvements || []).forEach((d) => lines.push(`- ${d}`));
+    lines.push('');
+
+    lines.push('## Monitor');
+    (r.monitor || []).forEach((m) => {
+      const label = CHAOSS_LABELS[m] || m;
+      lines.push(`- ${label}`);
+    });
+    lines.push('');
+
+    lines.push('## Closure / Merge Ratio');
+    lines.push(`- Issues: ${formatNumber(issueClosureRatio, '')}`);
+    lines.push(`- PR: ${formatNumber(prClosureRatio, '')}`);
+    return lines.join('\n');
+  }, [report, issueClosureRatio, prClosureRatio]);
 
   const renderStatsRow = (items) => (
     <div className="trend-stat-row">
@@ -245,9 +306,9 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
             </button>
           </div>
           <div className="pill-group">
-            {[7, 30, 90].map((d) => (
-              <button key={d} className={`pill ${timeRange === d ? 'active' : ''}`} onClick={() => setTimeRange(d)}>
-                {d}天
+            {TIME_PRESETS.map((p) => (
+              <button key={p.value} className={`pill ${timeRange === p.value ? 'active' : ''}`} onClick={() => setTimeRange(p.value)}>
+                {p.label}
               </button>
             ))}
           </div>
@@ -272,6 +333,37 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
 
       {!loading && activeTab === 'overview' && (
         <>
+          {/* Composite overview cards */}
+          {composite.series && (
+            <div className="trend-cards">
+              {[{ key: 'vitality', title: '活跃度综合分', accent: '#2563eb', seriesKey: 'vitality_composite' },
+                { key: 'responsiveness', title: '响应性综合分', accent: '#f97316', seriesKey: 'responsiveness_composite' },
+                { key: 'resilience', title: '稳健度综合分', accent: '#22c55e', seriesKey: 'resilience_composite' }].map((card) => {
+                  const s = composite.series[card.seriesKey] || [];
+                  const kpi = composite.kpis?.[card.key] || { value: null, delta: null };
+                  return (
+                    <div key={card.key} className="trend-card">
+                      <div className="trend-card-header">
+                        <div className="eyebrow">Composite</div>
+                        <h3>{card.title}</h3>
+                        <p>滚动窗口归一化 + 加权求和（0~100）</p>
+                      </div>
+                      <div className="trend-card-body">
+                        <div className="trend-value">{formatNumber(kpi.value, '')}</div>
+                        <div className={`trend-change ${kpi.delta > 0 ? 'trend-up' : kpi.delta < 0 ? 'trend-down' : ''}`}>
+                          {kpi.delta === null ? '—' : `${kpi.delta > 0 ? '↑' : kpi.delta < 0 ? '↓' : '→'} ${formatNumber(Math.abs(kpi.delta), '')}`}
+                        </div>
+                      </div>
+                      <ReactECharts
+                        option={buildLineOption(card.seriesKey, s, null, card.accent, '')}
+                        style={{ height: 180 }}
+                        opts={{ useResizeObserver: false }}
+                      />
+                    </div>
+                  );
+                })}
+            </div>
+          )}
           <div className="trend-cards">
             {OVERVIEW_CARDS.map((card, idx) => {
               const val = latestValue(card.key);
@@ -299,61 +391,50 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
             })}
           </div>
 
-          <div className="ai-report-card">
+          <section className="analysis-card markdown-card">
             <div className="analysis-head">
               <div>
                 <div className="eyebrow">AI 趋势解读</div>
-                <h2>Identify → Diagnosis → Improve → Monitor</h2>
+                <h2>Markdown 格式洞察</h2>
               </div>
-              <div className="chip">时间窗：{timeRange} 天</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="chip">时间窗：{timeRange} 天</div>
+                <button className="ghost-btn" onClick={() => setZoomOpen(true)} title="放大查看">⤢</button>
+              </div>
             </div>
             {report ? (
-              <div className="report-grid">
-                <div>
-                  <h4>Identify</h4>
-                  <p>{report.report?.identify || '—'}</p>
+              reportMarkdown ? (
+                <div className="markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportMarkdown}</ReactMarkdown>
                 </div>
-                <div>
-                  <h4>Diagnosis</h4>
-                  <ul>
-                    {(report.report?.diagnosis || []).map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h4>Need Data?</h4>
-                  <ul>
-                    {(report.report?.need_data || []).map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h4>Improvements</h4>
-                  <ul>
-                    {(report.report?.improvements || []).map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h4>Monitor</h4>
-                  <div className="pill-group inline">
-                    {(report.report?.monitor || []).map((m) => (
-                      <span key={m} className="pill ghost">{CHAOSS_LABELS[m] || m}</span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h4>Closure / Merge Ratio</h4>
-                  <p>Issues: {formatNumber(issueClosureRatio, '')} · PR: {formatNumber(prClosureRatio, '')}</p>
-                </div>
-              </div>
+              ) : (
+                <div className="loading-text">暂无报告内容</div>
+              )
             ) : (
               <div className="loading-text">报告生成中...</div>
             )}
-          </div>
+          </section>
+
+          {zoomOpen && (
+            <div className="trend-modal-overlay" onClick={() => setZoomOpen(false)}>
+              <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="trend-modal-head">
+                  <div>
+                    <div className="eyebrow">AI 趋势解读</div>
+                    <h3>报告放大查看</h3>
+                  </div>
+                  <button className="ghost-btn" onClick={() => setZoomOpen(false)}>关闭</button>
+                </div>
+                {reportMarkdown ? (
+                  <div className="plan-modal-body markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportMarkdown}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="loading-text">暂无报告内容</div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -379,8 +460,58 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
 
       {!loading && activeTab === 'risk' && (
         <>
-          {renderStatsRow(RISK_METRICS)}
-          {renderChartGrid(RISK_METRICS, '#22c55e')}
+          {riskViability.kpis && (
+            <div className="trend-stat-row">
+              {[
+                { key: 'bus_factor', title: 'Bus Factor' },
+                { key: 'resilience', title: 'Resilience Index' },
+                { key: 'top1_share', title: 'Top1 Share' },
+                { key: 'retention_proxy', title: 'Retention Rate (Proxy)' },
+                { key: 'scorecard', title: 'Scorecard Score' }
+              ].map((item) => {
+                const kpi = riskViability.kpis[item.key] || { value: null, delta: null };
+                return (
+                  <div key={item.key} className="trend-stat-card">
+                    <div className="stat-label">{item.title}</div>
+                    <div className="stat-value">{formatNumber(kpi.value)}</div>
+                    <div className={`stat-delta ${kpi.delta > 0 ? 'up' : kpi.delta < 0 ? 'down' : ''}`}>
+                      {kpi.delta === null ? '—' : `${kpi.delta > 0 ? '+' : ''}${formatNumber(kpi.delta)}`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {riskViability.series && (
+            <div className="trend-chart-grid">
+              {[
+                { key: 'bus_factor', title: 'Bus Factor' },
+                { key: 'resilience', title: 'Resilience Index' },
+                { key: 'top1_share', title: 'Top1 Share' },
+                { key: 'retention_proxy', title: 'Retention Rate (Proxy)' },
+                { key: 'scorecard', title: 'Scorecard Score' }
+              ].map((item) => {
+                const data = riskViability.series[item.key] || [];
+                const latestValue = data.length > 0 ? data[data.length - 1].value : null;
+                return (
+                  <div key={item.key} className="chart-card">
+                    <div className="chart-head">
+                      <div>
+                        <div className="eyebrow">CHAOSS</div>
+                        <h3>{item.title}</h3>
+                      </div>
+                      <div className="chart-meta">最新 {formatNumber(latestValue)}</div>
+                    </div>
+                    <ReactECharts
+                      option={buildLineOption(item.key, data, null, '#22c55e')}
+                      style={{ height: 260 }}
+                      opts={{ useResizeObserver: false }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
     </div>

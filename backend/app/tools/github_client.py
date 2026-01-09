@@ -50,10 +50,17 @@ class GitHubClient:
 
     ISSUE_TTL_SECONDS = 3600  # 1h
     CONTENT_TTL_SECONDS = 86400 * 7  # 7d
+    RATE_LIMIT_BACKOFF_SECONDS = 600  # 10m backoff when GitHub returns 403
 
     def __init__(self, token: Optional[str] = None) -> None:
         self.base_url = "https://api.github.com"
         self.token = token or settings.GITHUB_TOKEN
+
+    def is_rate_limited(self) -> bool:
+        return _cache.get("issues", "__rate_limited__") is not None
+
+    def _mark_rate_limited(self) -> None:
+        _cache.set("issues", "__rate_limited__", True, self.RATE_LIMIT_BACKOFF_SECONDS)
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/vnd.github+json"}
@@ -70,6 +77,9 @@ class GitHubClient:
         return resp.json()
 
     def search_issues(self, repo: str, label: str, per_page: int = 10) -> List[Dict[str, Any]]:
+        if self.is_rate_limited():
+            return []
+
         cache_key = f"issues:{repo}:{label}:{per_page}"
         cached = _cache.get("issues", cache_key)
         if cached is not None:
@@ -80,6 +90,10 @@ class GitHubClient:
         try:
             data = self._get_json(f"{self.base_url}/search/issues", params=params) or {}
             items = data.get("items", []) if isinstance(data, dict) else []
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 403:
+                self._mark_rate_limited()
+            items = []
         except Exception:
             items = []
         _cache.set("issues", cache_key, items, self.ISSUE_TTL_SECONDS)

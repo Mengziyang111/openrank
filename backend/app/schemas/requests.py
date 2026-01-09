@@ -54,6 +54,6 @@ class TrendDerivedRequest(BaseModel):
 
 class TrendReportRequest(BaseModel):
     repo: str = Field(..., description="仓库名称，格式：owner/repo")
-    time_window: int = Field(30, description="时间窗口，默认 30 天")
+    time_window: Optional[int | str] = Field(None, description="时间窗口（天），支持 all 表示全量")
     trend_conclusions: Optional[Dict[str, str]] = Field(None, description="趋势结论")
     key_metrics: Optional[Dict[str, Any]] = Field(None, description="关键指标数据")

@@ -6,27 +6,24 @@ import remarkGfm from 'remark-gfm';
 import './App.css';
 import TrendMonitor from './pages/TrendMonitor';
 import {
-  postAgentRun,
   refreshTodayHealth,
   refreshHealth,
   fetchLatestHealthOverview,
   fetchDataEaseDashboardUrl,
+  postNewcomerPlan,
+  fetchNewcomerIssues,
+  postTaskBundle,
   fetchTrend,
   bootstrapHealth,
-  postNewcomerPlan,
+  fetchRiskViability,
 } from './service/api';
 
 const navItems = [
   { key: 'ai', label: 'AI 聊天', note: '主界面' },
-  { key: 'health', label: '健康体检', note: '健康分与雷达' },
+  { key: 'health', label: '健康体检', note: '指标与报告' },
   { key: 'benchmark', label: '开源新人', note: '贡献导航' },
   { key: 'trend', label: '趋势监控', note: '趋势解读' },
-  { key: 'actions', label: '行动中心', note: '治理清单' },
-  { key: 'alerts', label: '风险预警', note: '实时提示' },
-];
 
-const conversations = [
-  { id: 'conv-1', repo: 'microsoft/vscode', tag: '默认' },
 ];
 
 const quickPrompts = [
@@ -47,55 +44,27 @@ const healthSnapshot = {
     { label: '风险', value: 81 },
   ],
   takeaways: [
-    '活跃度稳定，但响应维度偏弱，主要是 issue 首响偏慢。',
-    '治理分高，社区规约齐全，Scorecard 得分 8.1。',
-    '风险集中在 backlog age 和 bus factor，需要关注核心贡献者占比。',
+    '项目保持稳定活跃，OpenRank 持续上升。',
+    '响应度略低，建议关注 issue 回复及时性。',
+    '治理能力较强，可继续优化风险监测。',
   ],
 };
 
-const benchmarkCards = [
-  { title: '健康分分位', detail: '第 65 分位 · 响应度拖后腿' },
-  { title: '关键差距', detail: '首响中位数 28h · backlog age 32 天' },
-  { title: '对标仓库', detail: 'facebook/react · vuejs/core · angular/angular' },
+const initialMessages = [
+  { id: 'm-1', role: 'assistant', text: '你好，我是 OpenSage，随时可以帮你体检仓库、生成路线和治理建议。' },
 ];
 
 const actionTasks = [
-  { title: 'Triage 本周新增 issue，设定首响负责人', impact: '响应度 ↑', effort: 'S' },
-  { title: '清理 age>30 天 backlog，先处理 top10', impact: '韧性 ↑', effort: 'M' },
-  { title: '发布 contributor guide 与模板，降低新人门槛', impact: '治理 ↑', effort: 'M' },
-  { title: '轮值值班表，确保 24h 首响', impact: '响应度 ↑', effort: 'S' },
+  { title: '提升响应度：Issue 首响 < 24h', impact: '高影响', effort: '中' },
+  { title: '治理欠缺：补充安全扫描 + License 检查', impact: '中影响', effort: '中' },
+  { title: '社区活跃：安排每周 triage & 新人引导', impact: '中影响', effort: '低' },
 ];
 
 const alertList = [
-  { title: '响应度预警：首响中位数 > 24h', time: '今天 09:12', level: 'high' },
-  { title: 'Backlog age > 30 天的 issue 12 个', time: '昨天 18:20', level: 'medium' },
-  { title: 'Bus factor 风险：top1 占比 46%', time: '本周', level: 'medium' },
-  { title: '活跃度周环比 -12%', time: '本周', level: 'low' },
+  { title: '响应度连续下降 14 天', level: 'high', time: '2h 前' },
+  { title: 'OpenRank 波动 > 15%', level: 'medium', time: '1 天前' },
+  { title: 'Top5 贡献占比 82%', level: 'medium', time: '3 天前' },
 ];
-
-const initialMessages = [
-  {
-    id: 'm-1',
-    role: 'assistant',
-    text: '你好，我是 OpenRank Agent。告诉我你的仓库和需求，我会给出健康体检、对标、治理建议或风险预警。',
-  },
-];
-
-function formatAssistantReply(payload) {
-  if (!payload) return '已处理，稍后再试试。';
-  const parts = [];
-  if (payload.summary?.headline) parts.push(payload.summary.headline);
-  if (payload.summary?.key_points?.length) {
-    parts.push(payload.summary.key_points.map((p) => `- ${p}`).join('\n'));
-  }
-  if (payload.actions?.length) {
-    parts.push('行动建议：\n' + payload.actions.map((a) => `- [${a.priority || 'P1'}] ${a.action}`).join('\n'));
-  }
-  if (payload.links?.length) {
-    parts.push('相关链接：\n' + payload.links.map((l) => `- ${l}`).join('\n'));
-  }
-  return parts.filter(Boolean).join('\n\n');
-}
 
 function pickMarkdown(payload) {
   const candidates = [
@@ -142,20 +111,34 @@ function App() {
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState('microsoft/vscode');
-  const [domain, setDomain] = useState('Web前端');
-  const [stack, setStack] = useState('JavaScript/TypeScript');
-  const [timePerWeek, setTimePerWeek] = useState('1-2小时/周');
+  const [domain, setDomain] = useState('frontend');
+  const [stack, setStack] = useState('javascript');
+  const [timePerWeek, setTimePerWeek] = useState('1-2h');
   const [keywords, setKeywords] = useState('');
   const [plan, setPlan] = useState(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState('');
   const [activeTaskTab, setActiveTaskTab] = useState('good_first_issue');
   const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [issuesBoard, setIssuesBoard] = useState(null);
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [activeIssuesRepo, setActiveIssuesRepo] = useState(null);
+  const [taskBundle, setTaskBundle] = useState(null);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskLoading, setTaskLoading] = useState(false);
+  const [taskError, setTaskError] = useState('');
   
   // 添加调试信息，监听selectedRepo变化
   useEffect(() => {
     console.log('selectedRepo变化:', selectedRepo);
   }, [selectedRepo]);
+
+  useEffect(() => {
+    if (plan?.recommended_repos?.length) {
+      setActiveIssuesRepo(plan.recommended_repos[0].repo_full_name);
+      setIssuesBoard(plan.issues_board || null);
+    }
+  }, [plan]);
   const [activeNav, setActiveNav] = useState('ai');
   const [healthOverview, setHealthOverview] = useState(null);
   const [healthMarkdown, setHealthMarkdown] = useState('');
@@ -653,6 +636,9 @@ function App() {
         keywords,
       });
       setPlan(res);
+      setIssuesBoard(res?.issues_board || null);
+      const firstRepo = res?.recommended_repos?.[0]?.repo_full_name;
+      setActiveIssuesRepo(firstRepo || null);
       setActiveTaskTab('good_first_issue');
       setPlanModalOpen(true);
       return res;
@@ -665,6 +651,23 @@ function App() {
     }
   }, [domain, stack, timePerWeek, keywords]);
 
+  const handleSwitchIssuesRepo = useCallback(
+    async (repoName, readiness = 60) => {
+      if (!repoName) return;
+      setIssuesLoading(true);
+      setActiveIssuesRepo(repoName);
+      try {
+        const res = await fetchNewcomerIssues(repoName, readiness);
+        setIssuesBoard(res);
+      } catch (err) {
+        setPlanError(err?.message || '任务看板加载失败');
+      } finally {
+        setIssuesLoading(false);
+      }
+    },
+    [],
+  );
+
   const handleShowRoute = useCallback(async () => {
     if (!plan) {
       const res = await handleGeneratePlan();
@@ -673,22 +676,47 @@ function App() {
     setPlanModalOpen(true);
   }, [handleGeneratePlan, plan]);
 
+  async function handleClaimTask(task) {
+    if (!task) return;
+    setTaskLoading(true);
+    setTaskError('');
+    try {
+      const res = await postTaskBundle({
+        repo_full_name: task.repo_full_name,
+        issue_identifier: task.issue_number || task.url || task.title,
+      });
+      setTaskBundle(res);
+      setTaskModalOpen(true);
+    } catch (err) {
+      setTaskError(err?.message || '领取失败，请稍后再试');
+    } finally {
+      setTaskLoading(false);
+    }
+  }
+
   const handleClaimFirstTask = useCallback(async () => {
     const currentPlan = plan || (await handleGeneratePlan());
-    const list = currentPlan?.tasks?.[activeTaskTab] || [];
+    const list = (issuesBoard || currentPlan?.issues_board || {})[activeTaskTab] || [];
     if (!list.length) {
       setPlanError('暂无可领取的任务');
       return;
     }
     const first = list[0];
-    if (first?.url) {
-      window.open(first.url, '_blank', 'noopener');
+    await handleClaimTask(first);
+  }, [activeTaskTab, handleGeneratePlan, issuesBoard, plan]);
+
+  const handleCopyTaskBundle = useCallback(async () => {
+    if (!taskBundle?.copyable_checklist) return;
+    try {
+      await navigator.clipboard.writeText(taskBundle.copyable_checklist);
+    } catch (err) {
+      setTaskError(err?.message || '复制失败');
     }
-  }, [activeTaskTab, handleGeneratePlan, plan]);
+  }, [taskBundle]);
 
   const handleCopyPlanSteps = useCallback(async () => {
     const currentPlan = plan || (await handleGeneratePlan());
-    const markdown = currentPlan?.default_steps?.copy_markdown;
+    const markdown = currentPlan?.copyable_checklist;
     if (!markdown) {
       setPlanError('暂无可复制的步骤');
       return;
@@ -701,34 +729,30 @@ function App() {
   }, [handleGeneratePlan, plan]);
 
   const planSummary = useMemo(() => {
-    if (!plan?.repos?.length) return '';
-    const top = plan.repos[0];
+    if (!plan?.recommended_repos?.length) return '';
+    const top = plan.recommended_repos[0];
     const reasons = top.reasons || [];
-    const ds = plan.default_steps || {};
-    const pr = ds.pr_steps && ds.pr_steps.length ? ds.pr_steps : ['按 Fork→Clone→Build→PR→Review→Merge 路径执行'];
-    const trend = typeof top.trend_30d_percent === 'number' ? `${top.trend_30d_percent >= 0 ? '+' : ''}${top.trend_30d_percent}%` : '';
-    const health = top.scores?.health !== undefined ? Math.round(top.scores.health) : undefined;
-    const resp = top.scores?.resp !== undefined ? Math.round(top.scores.resp) : undefined;
-    const domain = top.domain || top.tech_family || top.primary_language || '目标领域';
-    const pain = reasons[0] || '典型业务痛点';
-    const tech = top.primary_language || top.language || '核心技术栈';
+    const trend = typeof top.trend_delta === 'number' ? `${top.trend_delta >= 0 ? '+' : ''}${top.trend_delta}%` : '';
+    const readiness = top.readiness_score !== undefined ? Math.round(top.readiness_score) : undefined;
+    const fit = top.fit_score !== undefined ? Math.round(top.fit_score) : undefined;
+    const timeline = plan.timeline || [];
 
     return [
       '## 推荐仓库',
       `- 仓库：${top.repo_full_name || top.name || ''}`,
-      `- 匹配度：${top.match_percent ?? '--'}%` + (health !== undefined ? ` ｜ 健康度：${health}分` : '') + (trend ? ` ｜ 近30天活跃：${trend}` : ''),
-      resp !== undefined ? `- 维护者响应：${resp}分` : null,
+      `- 匹配度（Fit）：${fit ?? '--'}% ｜ 新手就绪度：${readiness ?? '--'}%` + (trend ? ` ｜ 近30天趋势：${trend}` : ''),
+      top.difficulty ? `- 上手难度：${top.difficulty}` : null,
       '',
       '## 推荐理由',
-      `- 💡 项目定位：这个项目在 ${domain} 中处于活跃地位，主要解决了 ${pain}，用于快速落地与实践。`,
-      `- 🎯 推荐逻辑：基于你的技能匹配度（${top.match_percent ?? '--'}%）与技术栈 ${tech}，这个项目能让你在 ${domain} 方向获得实战。`,
-      `- 📈 成长阶梯：1) 熟悉工程规范；2) 掌握 ${tech} 核心技术；3) 建立 ${domain} 社区联系。`,
+      ...reasons.slice(0, 5).map((r) => `- ${r}`),
       '',
-      '## PR Checklist',
-      ...pr.map((s) => `- ${s}`),
-      ds.notes ? `
-> ${ds.notes}` : null,
+      '## 贡献路径',
+      ...timeline.map((step) => `- ${step.title}: ${(step.commands || []).join(' ｜ ')}`),
+      '',
+      '## 复制命令',
+      plan.copyable_checklist ? plan.copyable_checklist.split('\n').map((l) => l) : [],
     ]
+      .flat()
       .filter(Boolean)
       .join('\n');
   }, [plan]);
@@ -775,8 +799,9 @@ function App() {
             <div className="health-hero" style={{ '--theme-color': themeColor }}>
               <div className="health-head-row">
                 <div className="health-head-info">
-                  <div className="eyebrow">健康体检</div>
+                  <div className="eyebrow health-eyebrow">健康体检</div>
                   <div className="health-head-title">数据总览</div>
+                  <p className="health-head-desc">一屏看活跃 · 响应 · 韧性 · 治理 · 安全五维体检</p>
                 </div>
               </div>
               <div className="health-hero-grid two-columns">
@@ -904,26 +929,61 @@ function App() {
     }
 
     if (activeNav === 'benchmark') {
-      const interestAreas = ['Web前端', '后端/企业应用', '移动开发', '云原生/基础设施', 'AI/深度学习', '安全/合规', '开源生态分析', '文档', '翻译'];
-      const skillStacks = ['JavaScript/TypeScript', 'Python', 'Go', 'Java', 'Rust'];
-      const timeCommits = ['1-2小时/周', '3-5小时/周', '5-10小时/周', '10+小时/周'];
-
-      const fallbackProjects = [
-        { repo_full_name: 'microsoft/vscode', match_percent: 95, difficulty: 'Easy', activity_percent: 98, maintainer_response_percent: 92, trend_30d_percent: 12, description: 'Visual Studio Code - 开源代码编辑器' },
-        { repo_full_name: 'facebook/react', match_percent: 92, difficulty: 'Medium', activity_percent: 99, maintainer_response_percent: 89, trend_30d_percent: 8, description: 'React - JavaScript 库，用于构建用户界面' },
-        { repo_full_name: 'vuejs/core', match_percent: 90, difficulty: 'Easy', activity_percent: 97, maintainer_response_percent: 94, trend_30d_percent: 15, description: 'Vue.js - 渐进式 JavaScript 框架' },
-        { repo_full_name: 'python/cpython', match_percent: 88, difficulty: 'Medium', activity_percent: 96, maintainer_response_percent: 85, trend_30d_percent: 5, description: 'Python 解释器' },
+      const interestAreas = [
+        { label: 'Web前端', value: 'frontend' },
+        { label: '后端/企业应用', value: 'backend_enterprise' },
+        { label: '移动开发', value: 'mobile' },
+        { label: '云原生/基础设施', value: 'cloud_infra' },
+        { label: 'AI/深度学习', value: 'ai_ml' },
+        { label: '安全/合规', value: 'security' },
+        { label: '开源生态分析', value: 'oss_analytics' },
+        { label: '文档', value: 'docs' },
+        { label: '翻译', value: 'i18n' },
+      ];
+      const skillStacks = [
+        { label: 'JavaScript/TypeScript', value: 'javascript' },
+        { label: 'Python', value: 'python' },
+        { label: 'Go', value: 'go' },
+        { label: 'Java', value: 'java' },
+        { label: 'Rust', value: 'rust' },
+        { label: 'TypeScript (TS)', value: 'typescript' },
+        { label: 'Node.js / Express', value: 'nodejs' },
+        { label: 'React', value: 'react' },
+        { label: 'Vue', value: 'vue' },
+        { label: 'Angular', value: 'angular' },
+        { label: 'PHP / Laravel', value: 'php' },
+        { label: 'C# / .NET', value: 'csharp' },
+        { label: 'C/C++', value: 'cpp' },
+        { label: 'Kotlin', value: 'kotlin' },
+        { label: 'Swift', value: 'swift' },
+        { label: 'Dart / Flutter', value: 'flutter' },
+        { label: 'SQL / 数据库', value: 'sql' },
+      ];
+      const timeCommits = [
+        { label: '1-2h/周', value: '1-2h' },
+        { label: '3-5h/周', value: '3-5h' },
+        { label: '6-10h/周', value: '6-10h' },
+        { label: '10h+/周', value: '10+h' },
       ];
 
-      const cards = (plan?.repos?.length ? plan.repos : fallbackProjects).map((item, idx) => ({
+      const fallbackProjects = [
+        { repo_full_name: 'microsoft/vscode', fit_score: 92, readiness_score: 88, difficulty: 'Easy', responsiveness: 12, activity: 98, trend_delta: 12, reasons: ['领域匹配：Web前端', '首响较快：12h'] },
+        { repo_full_name: 'facebook/react', fit_score: 90, readiness_score: 80, difficulty: 'Medium', responsiveness: 18, activity: 96, trend_delta: 8, reasons: ['生态活跃', '新手任务充足'] },
+        { repo_full_name: 'vuejs/core', fit_score: 88, readiness_score: 82, difficulty: 'Easy', responsiveness: 16, activity: 94, trend_delta: 15, reasons: ['响应积极', '健康度稳定'] },
+        { repo_full_name: 'python/cpython', fit_score: 85, readiness_score: 76, difficulty: 'Medium', responsiveness: 20, activity: 90, trend_delta: 5, reasons: ['社区成熟', '任务丰富'] },
+      ];
+
+      const rawCards = plan?.recommended_repos?.length ? plan.recommended_repos : fallbackProjects;
+      const cards = rawCards.map((item, idx) => ({
         id: idx,
         name: item.repo_full_name,
-        url: item.url,
-        match: item.match_percent,
-        difficulty: item.difficulty,
-        activity: item.activity_percent,
-        response: item.maintainer_response_percent,
-        trend: `${item.trend_30d_percent >= 0 ? '+' : ''}${item.trend_30d_percent}%`,
+        url: item.url || `https://github.com/${item.repo_full_name}`,
+        fit: Math.round(item.fit_score ?? item.match_score ?? 0),
+        readiness: Math.round(item.readiness_score ?? 0),
+        difficulty: item.difficulty || 'Medium',
+        responsiveness: item.responsiveness !== undefined && item.responsiveness !== null ? `${Math.round(item.responsiveness)}h` : '--',
+        activity: item.activity !== undefined && item.activity !== null ? Math.round(item.activity) : '--',
+        trend: typeof item.trend_delta === 'number' ? `${item.trend_delta >= 0 ? '+' : ''}${Math.round(item.trend_delta)}%` : '--',
         description: item.description || '点击查看仓库详情',
         reasons: item.reasons || [],
       }));
@@ -938,20 +998,19 @@ function App() {
         docs: [
           { title: '更新中文文档', repo_full_name: 'vuejs/core', difficulty: 'Easy', url: '#' },
         ],
-        translation: [
+        i18n: [
           { title: '翻译 README 到日语', repo_full_name: 'python/cpython', difficulty: 'Easy', url: '#' },
         ],
       };
 
-      const tasksSource = plan?.tasks || fallbackTasks;
+      const tasksSource = issuesBoard || plan?.issues_board || fallbackTasks;
       const taskTabs = [
         { key: 'good_first_issue', label: 'Good First Issue' },
         { key: 'help_wanted', label: 'Help Wanted' },
         { key: 'docs', label: '文档类任务' },
-        { key: 'translation', label: '翻译类任务' },
+        { key: 'i18n', label: '翻译类任务' },
       ];
-
-      const defaultSteps = plan?.default_steps;
+      const timelineSteps = plan?.timeline || [];
 
       return (
         <div className="newcomer-wrapper">
@@ -977,7 +1036,7 @@ function App() {
                   }}
                 >
                   {interestAreas.map((area) => (
-                    <option key={area} value={area}>{area}</option>
+                    <option key={area.value} value={area.value}>{area.label}</option>
                   ))}
                 </select>
               </div>
@@ -995,7 +1054,7 @@ function App() {
                   }}
                 >
                   {skillStacks.map((skill) => (
-                    <option key={skill} value={skill}>{skill}</option>
+                    <option key={skill.value} value={skill.value}>{skill.label}</option>
                   ))}
                 </select>
               </div>
@@ -1013,7 +1072,7 @@ function App() {
                   }}
                 >
                   {timeCommits.map((time) => (
-                    <option key={time} value={time}>{time}</option>
+                    <option key={time.value} value={time.value}>{time.label}</option>
                   ))}
                 </select>
               </div>
@@ -1040,28 +1099,45 @@ function App() {
                 <div key={project.id} className="project-card">
                   <div className="project-header">
                     <div className="project-title">{project.name}</div>
-                    <div className="match-badge">匹配度 {project.match}%</div>
+                    <div className="match-badge">匹配度 {project.fit}%</div>
                   </div>
                   <div className="project-description">{project.description}</div>
                   <div className="project-metrics">
                     <div className="metric-item">
+                      <span className="metric-label">新手就绪度</span>
+                      <span className="metric-value">{project.readiness}%</span>
+                    </div>
+                    <div className="metric-item">
                       <span className="metric-label">上手难度</span>
                       <span className={`metric-value ${project.difficulty.toLowerCase()}`}>{project.difficulty}</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">维护者响应</span>
+                      <span className="metric-value">{project.responsiveness}</span>
                     </div>
                     <div className="metric-item">
                       <span className="metric-label">活跃度</span>
                       <span className="metric-value">{project.activity}%</span>
                     </div>
                     <div className="metric-item">
-                      <span className="metric-label">维护者响应</span>
-                      <span className="metric-value">{project.response}%</span>
-                    </div>
-                    <div className="metric-item">
-                      <span className="metric-label">近 30 天趋势</span>
+                      <span className="metric-label">近30天趋势</span>
                       <span className="metric-value positive">{project.trend}</span>
                     </div>
                   </div>
+                  {project.reasons?.length ? (
+                    <details className="why-block">
+                      <summary>为什么推荐</summary>
+                      <ul>
+                        {project.reasons.slice(0, 5).map((r, idx) => (
+                          <li key={`${project.id}-reason-${idx}`}>{r}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                   <div className="project-cta">
+                    <button className="project-btn" onClick={() => handleSwitchIssuesRepo(project.name, project.readiness)}>
+                      加载任务
+                    </button>
                     <button className="project-btn" onClick={() => project.url && window.open(project.url, '_blank', 'noopener')}>
                       查看项目
                     </button>
@@ -1070,12 +1146,12 @@ function App() {
               ))}
             </div>
           </section>
-          
+
           {/* 新手任务看板 */}
           <section className="newcomer-section">
             <div className="section-head">
               <h2>新手任务看板</h2>
-              <p>从简单任务开始，迈出你的开源贡献第一步</p>
+              <p>从简单任务开始，迈出你的开源贡献第一步 {activeIssuesRepo ? `（当前：${activeIssuesRepo}）` : ''}</p>
             </div>
             
             <div className="task-board">
@@ -1090,76 +1166,33 @@ function App() {
                   </button>
                 ))}
               </div>
-              
               <div className="task-list">
+                {issuesLoading && <div className="loading-text">任务加载中...</div>}
                 {(tasksSource[activeTaskTab] || []).map((task, idx) => (
                   <div key={`${task.title}-${idx}`} className="task-item">
                     <div className="task-type-badge">{task.repo_full_name}</div>
                     <div className="task-content">
                       <div className="task-title">{task.title}</div>
-                      <div className="task-repo">{task.repo_full_name}</div>
+                      <div className="task-repo">{(task.labels || []).slice(0, 3).join(' / ')}</div>
                       <div className="task-meta">
                         <span className={`difficulty ${(task.difficulty || 'Medium').toLowerCase()}`}>{task.difficulty || 'Medium'}</span>
+                        {task.updated_from_now ? <span className="task-updated">{task.updated_from_now}</span> : null}
                       </div>
                     </div>
                     <div className="task-actions">
-                      <button className="task-btn" onClick={() => task.url && window.open(task.url, '_blank', 'noopener')}>
+                      <button className="task-btn" onClick={() => handleClaimTask(task)} disabled={taskLoading}>
                         领取任务
                       </button>
                     </div>
                   </div>
                 ))}
-                {!planLoading && !(tasksSource[activeTaskTab] || []).length && (
+                {!planLoading && !issuesLoading && !(tasksSource[activeTaskTab] || []).length && (
                   <div className="loading-text">暂无任务</div>
                 )}
-                {planLoading && <div className="loading-text">任务加载中...</div>}
               </div>
             </div>
           </section>
           
-          {/* 贡献路径 Timeline */}
-          <section className="newcomer-section">
-            <div className="section-head">
-              <h2>贡献路径 Timeline</h2>
-              <p>从 0 到 1，完整的贡献流程</p>
-            </div>
-            <div className="contribution-timeline">
-              <div className="timeline-column">
-                <div className="timeline-title">PR Checklist</div>
-                <div className="timeline-list">
-                  {(defaultSteps?.pr_steps || ['提交 PR，等待 Review']).map((step, idx) => (
-                    <div key={`pr-${idx}`} className="timeline-row">{step}</div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
-          
-          {/* AI 指导侧栏 */}
-          <section className="ai-guide-section">
-            <div className="ai-guide-card">
-              <div className="ai-guide-header">
-                <h3>「我该怎么做」AI 指导</h3>
-                <div className="ai-icon">🤖</div>
-              </div>
-              
-              <div className="ai-input-group">
-                <textarea 
-                  placeholder="输入一句话，例如：'我会 Python，想做文档贡献'"
-                  className="ai-input"
-                ></textarea>
-                <button className="ai-submit-btn">生成指导</button>
-              </div>
-              
-              <div className="ai-result-preview">
-                <div className="ai-result-title">操作清单 + 指令</div>
-                <div className="ai-result-content">
-                  <p>根据你的输入，AI 将为你生成详细的操作步骤和指令...</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
           {planModalOpen && (
             <div className="trend-modal-overlay" onClick={() => setPlanModalOpen(false)}>
               <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
@@ -1179,6 +1212,43 @@ function App() {
                 ) : (
                   <div className="loading-text">暂无路线，请先生成。</div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {taskModalOpen && (
+            <div className="trend-modal-overlay" onClick={() => setTaskModalOpen(false)}>
+              <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="trend-modal-head">
+                  <div>
+                    <div className="eyebrow">任务领取</div>
+                    <h3>{taskBundle?.issue?.title || '任务步骤'}</h3>
+                  </div>
+                  <button className="ghost-btn" onClick={() => setTaskModalOpen(false)}>关闭</button>
+                </div>
+                {taskError && <div className="error-row">{taskError}</div>}
+                <div className="plan-modal-body">
+                  {(taskBundle?.steps || []).map((step, idx) => (
+                    <div key={`bundle-${idx}`} className="timeline-row">
+                      <div className="timeline-title">{step.title}</div>
+                      <div className="timeline-list">
+                        {(step.commands || []).map((cmd, cIdx) => (
+                          <div key={`bundle-cmd-${idx}-${cIdx}`} className="timeline-row">{cmd}</div>
+                        ))}
+                        {step.note ? <div className="timeline-note">{step.note}</div> : null}
+                      </div>
+                    </div>
+                  ))}
+                  {!taskBundle?.steps?.length && <div className="loading-text">暂无步骤</div>}
+                </div>
+                <div className="modal-footnote">
+                  <button className="primary-btn" onClick={handleCopyTaskBundle} disabled={!taskBundle?.copyable_checklist}>
+                    复制命令清单
+                  </button>
+                  {taskBundle?.issue?.url ? (
+                    <a className="project-btn" href={taskBundle.issue.url} target="_blank" rel="noreferrer">查看 Issue</a>
+                  ) : null}
+                </div>
               </div>
             </div>
           )}
@@ -1252,7 +1322,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">OpenRank Agent</div>
+        <div className="brand">OpenSage</div>
         <div className="top-nav-links">
           {navItems.map((item) => (
             <button
@@ -1375,7 +1445,7 @@ function App() {
                       
                       {/* 消息内容 */}
                       <div className="message-content-wrapper">
-                        <div className="message-role-label">{msg.role === 'assistant' ? 'OpenRank Agent' : '你'}</div>
+                        <div className="message-role-label">{msg.role === 'assistant' ? 'OpenSage' : '你'}</div>
                         <div className={`message-content ${msg.role === 'assistant' ? 'content-assistant' : 'content-user'}`}>
                           {msg.role === 'assistant' ? (
                             <div className="markdown-content">
@@ -1394,7 +1464,7 @@ function App() {
                     <div className="message-bubble message-assistant">
                       <div className="message-avatar avatar-assistant">🤖</div>
                       <div className="message-content-wrapper">
-                        <div className="message-role-label">OpenRank Agent</div>
+                        <div className="message-role-label">opensage</div>
                         <div className="message-content content-assistant">
                           <div className="typing-indicator">
                             <span></span>

@@ -640,6 +640,9 @@ body {
 
 .project-cta {
   margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .project-btn {
@@ -1045,7 +1048,7 @@ body {
 .hero-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px; /* 增大间隔让两块区域更舒展 */
 }
 
 /* 全屏切换按钮 */
@@ -1768,9 +1771,21 @@ body {
 }
 
 .health-head-title {
-  font-weight: 800;
-  font-size: 20px;
-  color: var(--text);
+  font-weight: 900;
+  font-size: 32px;
+  letter-spacing: -0.4px;
+  /* Blue → White gradient text */
+  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 45%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.health-head-desc {
+  margin: 6px 0 0;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .export-hero-card {
@@ -2335,13 +2350,34 @@ body {
 .health-hero {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  align-items: center;
+  text-align: center;
+  padding: 22px 24px 28px;
+  border-radius: 18px;
+  background: radial-gradient(circle at 20% 20%, #f0f9ff, transparent 45%),
+    radial-gradient(circle at 75% 10%, #e0f2fe, transparent 40%),
+    linear-gradient(135deg, #e0f2fe 0%, #ffffff 100%);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
+}
+
+/* Eyebrow gradient specific to health section */
+.health-eyebrow {
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 60%, #ffffff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .health-hero-grid {
   display: flex;
   gap: 16px;
   align-items: stretch;
+  width: 100%;
+  max-width: 1200px;
 }
 
 .gauge-panel {
@@ -2719,11 +2755,27 @@ body {
     gap: 20px;
     padding: 20px 24px;
     border-radius: 18px;
-    background: radial-gradient(circle at 20% 20%, #e0f2fe, transparent 45%),
-      radial-gradient(circle at 80% 0%, #dcfce7, transparent 40%),
-      linear-gradient(135deg, #0ea5e9 0%, #22c55e 100%);
+    position: relative; /* 为底部柔化渐变提供定位 */
+    /* Blue → White soft gradient, remove green tint */
+    background: radial-gradient(circle at 20% 20%, #f0f9ff, transparent 45%),
+      radial-gradient(circle at 75% 10%, #e0f2fe, transparent 40%),
+      linear-gradient(135deg, #e0f2fe 0%, #ffffff 100%);
     color: #0b1727;
-    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+    /* Softer shadow for a lighter, less intrusive card */
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  }
+
+  /* 在 hero 底部增加柔化过渡，使与下方内容连接更自然 */
+  .trend-hero::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -8px;
+    height: 24px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(224, 242, 254, 0.8), rgba(255, 255, 255, 0));
+    filter: blur(2px);
   }
 
   .trend-hero h1 {
@@ -2733,18 +2785,19 @@ body {
 
   .trend-hero p {
     margin: 0;
-    color: #0f172a;
-    opacity: 0.88;
-  }
+    border: 1px solid rgba(147, 197, 253, 0.5);
+    /* Extremely light blue background, echoes theme color */
+    background: linear-gradient(135deg, rgba(240, 249, 255, 0.95) 0%, rgba(255, 255, 255, 0.98) 100%);
+    backdrop-filter: blur(12px);
 
   .repo-input-group {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px; /* 输入框与按钮间距更大更自然 */
   }
-
-  .repo-input-group input {
-    background: #0b172733;
+    background: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.18), transparent 40%),
+      radial-gradient(circle at 80% 30%, rgba(224, 242, 254, 0.35), transparent 35%),
+      radial-gradient(circle at 60% 80%, rgba(190, 227, 248, 0.18), transparent 35%);
     color: #0f172a;
     border: 1px solid #0ea5e9;
     border-radius: 10px;
@@ -2754,7 +2807,7 @@ body {
 
   .pill-group {
     display: flex;
-    gap: 8px;
+    gap: 12px; /* 预设时间 pill 间距稍微增大 */
     flex-wrap: wrap;
     align-items: center;
   }

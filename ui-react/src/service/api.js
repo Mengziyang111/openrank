@@ -80,6 +80,23 @@ export async function postNewcomerPlan(payload) {
   return handleJsonResponse(res);
 }
 
+export async function fetchNewcomerIssues(repoFullName, readiness = 60) {
+  const url = new URL(`${API_BASE}/api/newcomer/issues`);
+  url.searchParams.set('repo_full_name', repoFullName);
+  url.searchParams.set('readiness', readiness);
+  const res = await fetch(url.toString());
+  return handleJsonResponse(res);
+}
+
+export async function postTaskBundle(payload) {
+  const res = await fetch(`${API_BASE}/api/newcomer/task_bundle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJsonResponse(res);
+}
+
 export async function fetchTrendSeries({ repo, metrics, start, end }) {
   const url = new URL(`${API_BASE}/api/trends/series`);
   url.searchParams.set('repo', repo);
@@ -108,5 +125,24 @@ export async function postTrendReport(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  return handleJsonResponse(res);
+}
+
+export async function fetchCompositeTrends({ repo, start, end, window_days = 180 }) {
+  const url = new URL(`${API_BASE}/api/trends/composite`);
+  url.searchParams.set('repo', repo);
+  if (start) url.searchParams.set('start', start);
+  if (end) url.searchParams.set('end', end);
+  if (window_days) url.searchParams.set('window_days', window_days);
+  const res = await fetch(url.toString());
+  return handleJsonResponse(res);
+}
+
+export async function fetchRiskViability(repo, start, end) {
+  const url = new URL(`${API_BASE}/risk_viability`);
+  url.searchParams.set('repo', repo);
+  if (start) url.searchParams.set('start', start);
+  if (end) url.searchParams.set('end', end);
+  const res = await fetch(url.toString());
   return handleJsonResponse(res);
 }

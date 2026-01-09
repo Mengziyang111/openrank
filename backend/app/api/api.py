@@ -1,10 +1,9 @@
 from fastapi import APIRouter
 from app.api import (
-    health_overview, 
+    health, 
     metrics, 
     dataease, 
     chat, 
-    health,
     forecast,  # 预测模块
     monitor,   # 监控模块
     portfolio, # 项目组合模块
@@ -17,7 +16,6 @@ api_router = APIRouter()
 
 # 基础与核心分析
 api_router.include_router(health.router)
-api_router.include_router(health_overview.router)
 api_router.include_router(metrics.router)
 
 # DataEase 适配与 IoTDB 导出

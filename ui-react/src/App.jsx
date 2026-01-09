@@ -16,6 +16,9 @@ import {
   fetchTrend,
   bootstrapHealth,
   fetchRiskViability,
+  fetchHealthReport,
+  fetchNewcomerReport,
+  fetchTrendReport,
 } from './service/api';
 
 const navItems = [
@@ -160,6 +163,8 @@ function App() {
   const [trendError, setTrendError] = useState('');
   const [historyRepos, setHistoryRepos] = useState([{ id: 'hist-1', repo: 'microsoft/vscode', tag: '历史' }]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [healthReport, setHealthReport] = useState(null);
+  const [newcomerReport, setNewcomerReport] = useState(null);
   const listEndRef = useRef(null);
   const trendChartRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -263,10 +268,16 @@ function App() {
     setHealthError('');
     setRiskLabel(null);
     try {
-      const res = await fetchLatestHealthOverview(selectedRepo);
-      const payload = res?.data || res;
+      const [overviewRes, reportRes] = await Promise.all([
+        fetchLatestHealthOverview(selectedRepo),
+        fetchHealthReport(selectedRepo)
+      ]);
+      
+      const payload = overviewRes?.data || overviewRes;
       setHealthOverview(payload);
       setHealthMarkdown(pickMarkdown(payload));
+      setHealthReport(reportRes);
+      
       const top5 = extractTop5Share(payload);
       if (top5 !== null && top5 > 80) {
         setRiskLabel(`风险预警：Top5 贡献占比 ${top5.toFixed(1)}%`);
@@ -275,6 +286,7 @@ function App() {
       setHealthError(err?.message || '加载健康数据失败');
       setHealthOverview(null);
       setHealthMarkdown('');
+      setHealthReport(null);
     } finally {
       setHealthLoading(false);
     }
@@ -629,21 +641,27 @@ function App() {
     setPlanLoading(true);
     setPlanError('');
     try {
-      const res = await postNewcomerPlan({
-        domain,
-        stack,
-        time_per_week: timePerWeek,
-        keywords,
-      });
-      setPlan(res);
-      setIssuesBoard(res?.issues_board || null);
-      const firstRepo = res?.recommended_repos?.[0]?.repo_full_name;
+      const [planRes, reportRes] = await Promise.all([
+        postNewcomerPlan({
+          domain,
+          stack,
+          time_per_week: timePerWeek,
+          keywords,
+        }),
+        fetchNewcomerReport(domain, stack, timePerWeek, keywords)
+      ]);
+      
+      setPlan(planRes);
+      setNewcomerReport(reportRes);
+      setIssuesBoard(planRes?.issues_board || null);
+      const firstRepo = planRes?.recommended_repos?.[0]?.repo_full_name;
       setActiveIssuesRepo(firstRepo || null);
       setActiveTaskTab('good_first_issue');
       setPlanModalOpen(true);
-      return res;
+      return planRes;
     } catch (err) {
       setPlan(null);
+      setNewcomerReport(null);
       setPlanError(err?.message || '生成失败，请稍后再试');
       return null;
     } finally {
@@ -880,12 +898,16 @@ function App() {
           <section className="analysis-card markdown-card">
             <div className="analysis-head">
               <div>
-                <div className="eyebrow">分析报告</div>
+                <div className="eyebrow">AI 分析报告</div>
                 <h2>Markdown 格式洞察</h2>
               </div>
             </div>
             {healthLoading ? (
               <div className="loading-text">报告加载中...</div>
+            ) : healthReport?.report_markdown ? (
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{healthReport.report_markdown}</ReactMarkdown>
+              </div>
             ) : renderedMarkdown ? (
               <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
             ) : (
@@ -1198,12 +1220,18 @@ function App() {
               <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="trend-modal-head">
                   <div>
-                    <div className="eyebrow">项目路线</div>
+                    <div className="eyebrow">AI 项目路线</div>
                     <h3>推荐原因 & 行动步骤</h3>
                   </div>
                   <button className="ghost-btn" onClick={() => setPlanModalOpen(false)}>关闭</button>
                 </div>
-                {planSummary ? (
+                {newcomerReport?.report_markdown ? (
+                  <div className="plan-modal-body markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {newcomerReport.report_markdown}
+                    </ReactMarkdown>
+                  </div>
+                ) : planSummary ? (
                   <div className="plan-modal-body markdown-body">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {planSummary}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { fetchTrendDerived, fetchTrendSeries, postTrendReport, fetchCompositeTrends, fetchRiskViability } from '../service/api';
+import { fetchTrendDerived, fetchTrendSeries, postTrendReport, fetchCompositeTrends, fetchRiskViability, fetchTrendReport } from '../service/api';
 
 const OVERVIEW_CARDS = [
   { key: 'metric_activity', title: '活跃度趋势', desc: 'commit / issue / PR 综合活跃' },
@@ -112,12 +112,12 @@ const TIME_PRESETS = [
 ];
 
 export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
-  const [repoInput, setRepoInput] = useState(repo || '');
   const [timeRange, setTimeRange] = useState(180);
   const [activeTab, setActiveTab] = useState('overview');
   const [series, setSeries] = useState([]);
   const [derived, setDerived] = useState({});
   const [report, setReport] = useState(null);
+  const [aiReport, setAiReport] = useState(null);
   const [composite, setComposite] = useState({ series: null, kpis: null, explain: null });
   const [riskViability, setRiskViability] = useState({ kpis: null, series: null, explain: null });
   const [loading, setLoading] = useState(false);
@@ -125,7 +125,6 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
   const [zoomOpen, setZoomOpen] = useState(false);
 
   useEffect(() => {
-    setRepoInput(repo || '');
   }, [repo]);
 
   const dateRange = useMemo(() => {
@@ -166,27 +165,29 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
   const prClosureRatio = useMemo(() => computeRatio(seriesMap, 'metric_prs_new', 'metric_change_requests_accepted'), [seriesMap]);
 
   const load = useCallback(async () => {
-    if (!repoInput) {
-      setError('请输入仓库');
+    if (!repo) {
+      setError('请选择仓库');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const payload = { repo: repoInput, metrics: METRIC_KEYS };
+      const payload = { repo: repo, metrics: METRIC_KEYS };
       if (dateRange.start) payload.start = dateRange.start;
       if (dateRange.end) payload.end = dateRange.end;
       const windowDays = timeRange === 'all' ? 180 : Math.max(30, Math.min(180, Number(timeRange) || 180));
-      const [seriesRes, derivedRes, reportRes, compositeRes, riskRes] = await Promise.all([
+      const [seriesRes, derivedRes, reportRes, compositeRes, riskRes, aiReportRes] = await Promise.all([
         fetchTrendSeries(payload),
         fetchTrendDerived({ ...payload, slope_window: timeRange === 'all' ? 30 : Math.min(14, timeRange) }),
-        postTrendReport({ repo: repoInput, time_window: timeRange === 'all' ? undefined : timeRange }),
-        fetchCompositeTrends({ repo: repoInput, start: dateRange.start, end: dateRange.end, window_days: windowDays }),
-        fetchRiskViability(repoInput, dateRange.start, dateRange.end)
+        postTrendReport({ repo: repo, time_window: timeRange === 'all' ? undefined : timeRange }),
+        fetchCompositeTrends({ repo: repo, start: dateRange.start, end: dateRange.end, window_days: windowDays }),
+        fetchRiskViability(repo, dateRange.start, dateRange.end),
+        fetchTrendReport(repo, timeRange === 'all' ? 180 : timeRange)
       ]);
       setSeries(seriesRes.series || seriesRes.data?.series || []);
       setDerived(derivedRes.derived || derivedRes.data?.derived || {});
       setReport(reportRes.report ? reportRes : reportRes.data || reportRes);
+      setAiReport(aiReportRes);
       setComposite({
         series: compositeRes.series || compositeRes.data?.series,
         kpis: compositeRes.kpis || compositeRes.data?.kpis,
@@ -204,13 +205,19 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
     } finally {
       setLoading(false);
     }
-  }, [repoInput, dateRange.start, dateRange.end, timeRange]);
+  }, [repo, dateRange.start, dateRange.end, timeRange]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const reportMarkdown = useMemo(() => {
+    // 优先使用AI报告
+    if (aiReport?.report_markdown) {
+      return aiReport.report_markdown;
+    }
+    
+    // 回退到旧报告
     if (!report?.report) return '';
     const r = report.report;
     const lines = [];
@@ -240,7 +247,7 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
     lines.push(`- Issues: ${formatNumber(issueClosureRatio, '')}`);
     lines.push(`- PR: ${formatNumber(prClosureRatio, '')}`);
     return lines.join('\n');
-  }, [report, issueClosureRatio, prClosureRatio]);
+  }, [aiReport, report, issueClosureRatio, prClosureRatio]);
 
   const renderStatsRow = (items) => (
     <div className="trend-stat-row">
@@ -290,20 +297,10 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
           <p>按仓库拉通活跃、响应、风险三大趋势，附带可解释指标与行动提示。</p>
         </div>
         <div className="hero-actions">
-          <div className="repo-input-group">
-            <label>仓库</label>
-            <input value={repoInput} onChange={(e) => setRepoInput(e.target.value)} placeholder="owner/repo" />
-            <button
-              className="primary-btn"
-              onClick={() => {
-                if (onRepoChange) onRepoChange(repoInput);
-                if (onRepoPinned) onRepoPinned(repoInput);
-                load();
-              }}
-              disabled={loading}
-            >
-              应用
-            </button>
+          {/* 当前仓库 */}
+          <div className="current-repo-badge">
+            <span className="repo-label">当前仓库:</span>
+            <span className="repo-value">{repo || '未选择'}</span>
           </div>
           <div className="pill-group">
             {TIME_PRESETS.map((p) => (

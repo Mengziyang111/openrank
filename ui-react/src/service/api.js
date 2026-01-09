@@ -146,3 +146,41 @@ export async function fetchRiskViability(repo, start, end) {
   const res = await fetch(url.toString());
   return handleJsonResponse(res);
 }
+
+// AI报告相关API调用
+export async function fetchHealthReport(repoFullName, timeWindowDays = 30) {
+  const res = await fetch(`${API_BASE}/ai/report/health`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo_full_name: repoFullName, time_window_days: timeWindowDays }),
+  });
+  return handleJsonResponse(res);
+}
+
+export async function fetchNewcomerReport(domain, stack, timePerWeek, keywords = '', topN = 3) {
+  const res = await fetch(`${API_BASE}/ai/report/newcomer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      domain, 
+      stack, 
+      time_per_week: timePerWeek, 
+      keywords, 
+      top_n: topN 
+    }),
+  });
+  return handleJsonResponse(res);
+}
+
+export async function fetchTrendReport(repoFullName, timeWindowDays = 180, metrics = ['activity', 'first_response', 'bus_factor', 'scorecard']) {
+  const res = await fetch(`${API_BASE}/ai/report/trend`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      repo_full_name: repoFullName, 
+      time_window_days: timeWindowDays, 
+      metrics 
+    }),
+  });
+  return handleJsonResponse(res);
+}

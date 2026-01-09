@@ -239,3 +239,7 @@ app.include_router(graph_router)
 app.include_router(dataease_router)
 app.include_router(api_router, prefix="/api")
 app.include_router(agent_router)
+
+# 包含AI服务路由
+from app.api.ai import router as ai_router
+app.include_router(ai_router)

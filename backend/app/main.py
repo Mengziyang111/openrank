@@ -17,19 +17,19 @@ from app.api.agent import router as agent_router
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.db.models import HealthOverviewDaily
-from datetime import date
+from datetime import date, datetime, timedelta
+from typing import Optional
 from statistics import quantiles
 
 setup_logging()
 app = FastAPI(title="OpenSODA OSS Copilot")
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+  allow_origins=["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:5174", "http://localhost:5174"],
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
 )
-
 @app.on_event("startup")
 def _startup():
     init_db()
@@ -58,21 +58,59 @@ def calculate_delta(current, previous):
         return None
     return current - previous
 
+def _repo_date_bounds(db: Session, repo: str):
+    from sqlalchemy import func
+    bounds = (
+        db.query(func.min(HealthOverviewDaily.dt), func.max(HealthOverviewDaily.dt))
+        .filter(HealthOverviewDaily.repo_full_name == repo)
+        .one_or_none()
+    )
+    if not bounds:
+        return None, None
+    return bounds[0], bounds[1]
+
+def _parse_date_range(start: Optional[str], end: Optional[str], default_days: int = 90):
+    try:
+        end_date = datetime.strptime(end, "%Y-%m-%d").date() if end else datetime.utcnow().date()
+    except ValueError:
+        end_date = datetime.utcnow().date()
+
+    if start:
+        try:
+            start_date = datetime.strptime(start, "%Y-%m-%d").date()
+        except ValueError:
+            start_date = end_date - timedelta(days=default_days)
+    else:
+        start_date = end_date - timedelta(days=default_days)
+
+    if start_date > end_date:
+        start_date = end_date - timedelta(days=default_days)
+    return start_date, end_date
+
 # 使用更简单的路径
 @app.get("/risk_viability")
 def get_risk_viability(
     repo: str = Query(..., description="owner/repo"),
-    start: date = Query(..., description="start date"),
-    end: date = Query(..., description="end date"),
+    start: Optional[str] = Query(None, description="start date"),
+    end: Optional[str] = Query(None, description="end date"),
     db: Session = Depends(get_db),
 ):
+    # 处理日期范围
+    if not start and not end:
+        min_dt, max_dt = _repo_date_bounds(db, repo)
+        if not min_dt or not max_dt:
+            return {"kpis": None, "series": None, "explain": None}
+        start_date, end_date = min_dt, max_dt
+    else:
+        start_date, end_date = _parse_date_range(start, end)
+    
     # Fetch data from health_overview_daily for the specified repo and date range
     rows = (
         db.query(HealthOverviewDaily)
         .filter(
             HealthOverviewDaily.repo_full_name == repo,
-            HealthOverviewDaily.dt >= start,
-            HealthOverviewDaily.dt <= end,
+            HealthOverviewDaily.dt >= start_date,
+            HealthOverviewDaily.dt <= end_date,
         )
         .order_by(HealthOverviewDaily.dt)
         .all()

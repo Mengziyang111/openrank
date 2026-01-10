@@ -74,21 +74,146 @@ class NewcomerFactsExtractor:
         repos = self._search_repo_catalog(domain, stack, keywords, limit=top_n * 2)
         
         for repo in repos:
+            # Calculate fit score based on domain and stack matching
+            fit_score = 50  # Base score
+            
+            # Add score for domain match
+            if domain and domain != "all":
+                # Check if domain is in domains array
+                if hasattr(repo, 'domains'):
+                    repo_domains = repo.domains
+                    # Handle different types of domains field
+                    if isinstance(repo_domains, list) and domain in repo_domains:
+                        fit_score += 30
+                    elif isinstance(repo_domains, str) and domain in repo_domains:
+                        fit_score += 30
+                # Check seed_domain as fallback
+                elif hasattr(repo, 'seed_domain') and repo.seed_domain == domain:
+                    fit_score += 30
+            
+            # Add score for stack match
+            if stack and stack != "all":
+                # Check if stack is in stacks array
+                if hasattr(repo, 'stacks'):
+                    repo_stacks = repo.stacks
+                    # Handle different types of stacks field
+                    if isinstance(repo_stacks, list) and stack in repo_stacks:
+                        fit_score += 20
+                    elif isinstance(repo_stacks, str) and stack in repo_stacks:
+                        fit_score += 20
+            
+            # Add score for keyword match
+            if keywords:
+                if hasattr(repo, 'repo_full_name') and keywords.lower() in repo.repo_full_name.lower():
+                    fit_score += 10
+                elif hasattr(repo, 'description') and repo.description and keywords.lower() in repo.description.lower():
+                    fit_score += 5
+            
+            # Ensure score is within 0-100 range
+            fit_score = min(100, max(0, fit_score))
+            
+            # Calculate readiness score based on health data
+            readiness_score = 70  # Base score
+            readiness_evidence = self._get_readiness_evidence(repo.repo_full_name)
+            
+            # Adjust readiness score based on evidence
+            if readiness_evidence:
+                # Check responsiveness
+                if readiness_evidence.get('responsiveness', {}).get('issue_response_time_h'):
+                    response_time = readiness_evidence['responsiveness']['issue_response_time_h']
+                    if response_time < 24:
+                        readiness_score += 15
+                    elif response_time < 72:
+                        readiness_score += 5
+                    elif response_time > 168:
+                        readiness_score -= 10
+                
+                # Check activity
+                if readiness_evidence.get('activity', {}).get('openrank'):
+                    openrank = readiness_evidence['activity']['openrank']
+                    if openrank > 500:
+                        readiness_score += 10
+                    elif openrank > 100:
+                        readiness_score += 5
+            
+            # Ensure score is within 0-100 range
+            readiness_score = min(100, max(0, readiness_score))
+            
+            # Determine difficulty based on scores
+            if fit_score >= 80 and readiness_score >= 80:
+                difficulty = "Easy"
+            elif fit_score >= 60 or readiness_score >= 60:
+                difficulty = "Medium"
+            else:
+                difficulty = "Hard"
+            
+            # Calculate trend delta based on activity
+            trend_delta = 0
+            if readiness_evidence.get('activity', {}).get('activity_growth'):
+                trend_delta = readiness_evidence['activity']['activity_growth']
+            else:
+                # Default trend based on fit score
+                if fit_score >= 80:
+                    trend_delta = 8
+                elif fit_score >= 60:
+                    trend_delta = 3
+                else:
+                    trend_delta = -2
+            
+            # Generate recommended reasons based on matching criteria
+            reasons = []
+            if domain and domain != "all":
+                # Check if domain is in domains array
+                domain_match = False
+                if hasattr(repo, 'domains'):
+                    repo_domains = repo.domains
+                    if isinstance(repo_domains, list) and domain in repo_domains:
+                        domain_match = True
+                    elif isinstance(repo_domains, str) and domain in repo_domains:
+                        domain_match = True
+                elif hasattr(repo, 'seed_domain') and repo.seed_domain == domain:
+                    domain_match = True
+                
+                if domain_match:
+                    reasons.append("领域匹配度高")
+            
+            if stack and stack != "all":
+                # Check if stack is in stacks array
+                stack_match = False
+                if hasattr(repo, 'stacks'):
+                    repo_stacks = repo.stacks
+                    if isinstance(repo_stacks, list) and stack in repo_stacks:
+                        stack_match = True
+                    elif isinstance(repo_stacks, str) and stack in repo_stacks:
+                        stack_match = True
+                
+                if stack_match:
+                    reasons.append("技术栈高度相关")
+            if fit_score >= 80:
+                reasons.append("整体匹配度优秀")
+            if readiness_score >= 80:
+                reasons.append("新手就绪度高")
+            if difficulty == "Easy":
+                reasons.append("难度较低，适合新手")
+            if trend_delta > 5:
+                reasons.append("社区活跃度上升趋势明显")
+            
+            # If no specific reasons, add general ones
+            if not reasons:
+                reasons = ["仓库活跃", "适合新手贡献"]
+            
             repo_facts = {
                 "repo_full_name": repo.repo_full_name,
-                "fit_score": 80,  # 默认值
-                "readiness_score": 75,  # 默认值
-                "difficulty": "Medium",  # 默认值
-                "trend_delta": 5,  # 默认值
-                "reasons": ["领域匹配", "技术栈相关"],  # 默认值
-                "readiness_evidence": {},
+                "fit_score": fit_score,
+                "readiness_score": readiness_score,
+                "difficulty": difficulty,
+                "trend_delta": trend_delta,
+                "reasons": reasons,
+                "readiness_evidence": readiness_evidence,
                 "tasks": [],
                 "onboarding": {}
             }
 
-            # Get readiness evidence from health data
-            repo_facts["readiness_evidence"] = self._get_readiness_evidence(repo.repo_full_name)
-            
             # Get tasks from repo_issues
             repo_facts["tasks"] = self._get_newcomer_tasks(repo.repo_full_name)
             
@@ -100,25 +225,66 @@ class NewcomerFactsExtractor:
             if len(recommended_repos) >= top_n:
                 break
 
+        # Sort by fit score in descending order
+        recommended_repos.sort(key=lambda x: x['fit_score'], reverse=True)
+
         return recommended_repos
 
-    def _search_repo_catalog(self, domain: str, stack: str, keywords: str, limit: int = 10) -> List[RepoCatalog]:
-        """Search repository catalog based on criteria.
-
-        Args:
-            domain: Interest domain
-            stack: Technology stack
-            keywords: Additional keywords
-            limit: Maximum number of repositories to return
-
-        Returns:
-            List of matching repositories
-        """
-        # This is a placeholder implementation
-        # In a real implementation, this would search the repo_catalog table
-        # and apply filters based on domain, stack, and keywords
+    def _search_repo_catalog(self, domain: str, stack: str, keywords: str, limit: int = 10):
+        """Search repository catalog based on criteria (Fixed Version)."""
         from app.models import RepoCatalog
-        return self.db.query(RepoCatalog).limit(limit).all()
+        from sqlalchemy import or_, cast, String, desc
+        
+        # 1. 基础查询
+        query = self.db.query(RepoCatalog)
+
+        # 2. 技术栈过滤 (Stack -> Primary Language OR Stacks Tag)
+        # 逻辑：只要 语言 或 技术栈标签 中包含该关键字即可
+        if stack and stack != "all":
+            query = query.filter(
+                or_(
+                    RepoCatalog.primary_language.ilike(f"%{stack}%"),
+                    cast(RepoCatalog.stacks, String).ilike(f"%{stack}%")
+                )
+            )
+
+        # 3. 领域与关键词过滤 (Domain/Keywords -> Description OR Topics OR Domains)
+        # 逻辑：把领域也当作一种关键词，去匹配描述、主题或领域标签
+        search_terms = []
+        if domain and domain != "all":
+            search_terms.append(domain)
+        if keywords:
+            search_terms.append(keywords)
+            
+        if search_terms:
+            conditions = []
+            for term in search_terms:
+                # 匹配描述
+                conditions.append(RepoCatalog.description.ilike(f"%{term}%"))
+                # 匹配 JSONB 类型的标签 (强转字符串后匹配，防止报错)
+                conditions.append(cast(RepoCatalog.topics, String).ilike(f"%{term}%"))
+                conditions.append(cast(RepoCatalog.domains, String).ilike(f"%{term}%"))
+            
+            # 满足任意一个条件即可
+            query = query.filter(or_(*conditions))
+
+        # 4. 排序：优先推荐 Star 数高的优质项目 (假设你有 stars 字段)
+        if hasattr(RepoCatalog, 'stars'):
+            query = query.order_by(desc(RepoCatalog.stars))
+        
+        # 执行查询
+        results = query.limit(limit).all()
+        
+        # 5. [重要] 兜底逻辑：如果什么都没搜到，返回 Top 仓库，而不是空
+        # 这样能避免页面一片空白，同时在控制台打印警告
+        if not results:
+            print(f"⚠️ Warning: No repos found for stack='{stack}', domain='{domain}'. Returning fallback top repos.")
+            fallback_query = self.db.query(RepoCatalog)
+            if hasattr(RepoCatalog, 'stars'):
+                fallback_query = fallback_query.order_by(desc(RepoCatalog.stars))
+            return fallback_query.limit(limit).all()
+            
+        return results
 
     def _get_readiness_evidence(self, repo_full_name: str) -> Dict[str, Any]:
         """Get readiness evidence for a repository.

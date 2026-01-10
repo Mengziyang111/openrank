@@ -15,10 +15,10 @@ import {
   postTaskBundle,
   fetchTrend,
   bootstrapHealth,
-  fetchRiskViability,
   fetchHealthReport,
   fetchNewcomerReport,
   fetchTrendReport,
+  postAgentRun,
 } from './service/api';
 
 const navItems = [
@@ -117,7 +117,6 @@ function App() {
   const [domain, setDomain] = useState('frontend');
   const [stack, setStack] = useState('javascript');
   const [timePerWeek, setTimePerWeek] = useState('1-2h');
-  const [keywords, setKeywords] = useState('');
   const [plan, setPlan] = useState(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState('');
@@ -146,7 +145,6 @@ function App() {
   const [healthOverview, setHealthOverview] = useState(null);
   const [healthMarkdown, setHealthMarkdown] = useState('');
   const [healthLoading, setHealthLoading] = useState(false);
-  const [healthError, setHealthError] = useState('');
   const [riskLabel, setRiskLabel] = useState(null);
   const [dataEaseLink, setDataEaseLink] = useState('');
   const [linkError, setLinkError] = useState('');
@@ -165,6 +163,7 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [healthReport, setHealthReport] = useState(null);
   const [newcomerReport, setNewcomerReport] = useState(null);
+  const [trendReport, setTrendReport] = useState(null);
   const listEndRef = useRef(null);
   const trendChartRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -265,7 +264,6 @@ function App() {
   const loadHealthOverview = useCallback(async () => {
     if (!selectedRepo) return;
     setHealthLoading(true);
-    setHealthError('');
     setRiskLabel(null);
     try {
       const [overviewRes, reportRes] = await Promise.all([
@@ -283,7 +281,7 @@ function App() {
         setRiskLabel(`风险预警：Top5 贡献占比 ${top5.toFixed(1)}%`);
       }
     } catch (err) {
-      setHealthError(err?.message || '加载健康数据失败');
+      console.error('加载健康数据失败:', err);
       setHealthOverview(null);
       setHealthMarkdown('');
       setHealthReport(null);
@@ -503,7 +501,6 @@ function App() {
 
       const reply = 
         res?.report?.text ||
-        formatAssistantReply(res?.tool_results?.length ? res : null) ||
         '已处理，稍后再试试。';
 
       setMessages((prev) => [...prev, { id: `${Date.now()}-a`, role: 'assistant', text: reply }]);
@@ -532,11 +529,6 @@ function App() {
       // 否则添加到最前面，最多保留10条
       return [{ id: `hist-${Date.now()}`, repo, tag: '历史' }, ...prev.slice(0, 9)];
     });
-  };
-
-  const handleSelectConversation = (repo) => {
-    setSelectedRepo(repo);
-    addToHistory(repo);
   };
 
   const handleNavClick = (key) => {
@@ -637,6 +629,27 @@ function App() {
     [selectedRepo],
   );
 
+  const loadTrendReport = useCallback(async () => {
+    if (!selectedRepo) return;
+    setTrendLoading(true);
+    setTrendError('');
+    try {
+      const reportRes = await fetchTrendReport(selectedRepo);
+      setTrendReport(reportRes);
+    } catch (err) {
+      setTrendError(err?.message || '趋势报告加载失败');
+      setTrendReport(null);
+    } finally {
+      setTrendLoading(false);
+    }
+  }, [selectedRepo]);
+
+  useEffect(() => {
+    if (activeNav === 'trend') {
+      loadTrendReport();
+    }
+  }, [activeNav, loadTrendReport]);
+
   const handleGeneratePlan = useCallback(async () => {
     setPlanLoading(true);
     setPlanError('');
@@ -646,9 +659,8 @@ function App() {
           domain,
           stack,
           time_per_week: timePerWeek,
-          keywords,
         }),
-        fetchNewcomerReport(domain, stack, timePerWeek, keywords)
+        fetchNewcomerReport(domain, stack, timePerWeek)
       ]);
       
       setPlan(planRes);
@@ -667,7 +679,7 @@ function App() {
     } finally {
       setPlanLoading(false);
     }
-  }, [domain, stack, timePerWeek, keywords]);
+  }, [domain, stack, timePerWeek]);
 
   const handleSwitchIssuesRepo = useCallback(
     async (repoName, readiness = 60) => {
@@ -712,16 +724,7 @@ function App() {
     }
   }
 
-  const handleClaimFirstTask = useCallback(async () => {
-    const currentPlan = plan || (await handleGeneratePlan());
-    const list = (issuesBoard || currentPlan?.issues_board || {})[activeTaskTab] || [];
-    if (!list.length) {
-      setPlanError('暂无可领取的任务');
-      return;
-    }
-    const first = list[0];
-    await handleClaimTask(first);
-  }, [activeTaskTab, handleGeneratePlan, issuesBoard, plan]);
+
 
   const handleCopyTaskBundle = useCallback(async () => {
     if (!taskBundle?.copyable_checklist) return;
@@ -732,19 +735,6 @@ function App() {
     }
   }, [taskBundle]);
 
-  const handleCopyPlanSteps = useCallback(async () => {
-    const currentPlan = plan || (await handleGeneratePlan());
-    const markdown = currentPlan?.copyable_checklist;
-    if (!markdown) {
-      setPlanError('暂无可复制的步骤');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(markdown);
-    } catch (err) {
-      setPlanError(err?.message || '复制失败');
-    }
-  }, [handleGeneratePlan, plan]);
 
   const planSummary = useMemo(() => {
     if (!plan?.recommended_repos?.length) return '';
@@ -899,17 +889,116 @@ function App() {
             <div className="analysis-head">
               <div>
                 <div className="eyebrow">AI 分析报告</div>
-                <h2>Markdown 格式洞察</h2>
+                <h2>多模块洞察</h2>
               </div>
             </div>
             {healthLoading ? (
               <div className="loading-text">报告加载中...</div>
-            ) : healthReport?.report_markdown ? (
-              <div className="markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{healthReport.report_markdown}</ReactMarkdown>
+            ) : healthReport?.report_json ? (
+              <div className="multi-module-report">
+                {/* 摘要卡片 */}
+                <div className="report-summary-card">
+                  <h3>摘要</h3>
+                  <ul className="summary-bullets">
+                    {healthReport.report_json.summary_bullets.map((bullet, idx) => (
+                      <li key={idx}>{bullet}</li>
+                    ))}
+                  </ul>
+                </div>
+                
+                {/* 详细部分 */}
+                <div className="report-sections">
+                  {healthReport.report_json.sections.map((section, idx) => (
+                    <div key={idx} className="report-section-card">
+                      <h3>{section.title}</h3>
+                      <div className="section-content">
+                        {section.content_md}
+                      </div>
+                      {section.evidence && section.evidence.length > 0 && (
+                        <div className="section-evidence">
+                          <h4>证据</h4>
+                          <ul>
+                            {section.evidence.map((evidence, eIdx) => (
+                              <li key={eIdx}>
+                                {evidence.key}: {evidence.value} {evidence.dt && `(截至 ${evidence.dt})`}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* 行动建议 */}
+                {healthReport.report_json.actions && healthReport.report_json.actions.length > 0 && (
+                  <div className="report-actions-card">
+                    <h3>行动建议</h3>
+                    {healthReport.report_json.actions.map((action, idx) => (
+                      <div key={idx} className="action-item">
+                        <div className="action-header">
+                          <span className={`priority-badge ${action.priority.toLowerCase()}`}>{action.priority}</span>
+                          <h4>{action.title}</h4>
+                        </div>
+                        <ul className="action-steps">
+                          {action.steps.map((step, sIdx) => (
+                            <li key={sIdx}>{step}</li>
+                          ))}
+                        </ul>
+                        {action.metrics_to_watch && action.metrics_to_watch.length > 0 && (
+                          <div className="metrics-to-watch">
+                            <span>监控指标：</span>
+                            {action.metrics_to_watch.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* 监控指标 */}
+                {healthReport.report_json.monitor && healthReport.report_json.monitor.length > 0 && (
+                  <div className="report-monitor-card">
+                    <h3>监控指标</h3>
+                    <ul className="monitor-list">
+                      {healthReport.report_json.monitor.map((metric, idx) => (
+                        <li key={idx}>{metric}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* 警告和数据缺口 */}
+                {(healthReport.report_json.warnings && healthReport.report_json.warnings.length > 0) || 
+                 (healthReport.report_json.data_gaps && healthReport.report_json.data_gaps.length > 0) && (
+                  <div className="report-warnings-card">
+                    {healthReport.report_json.warnings && healthReport.report_json.warnings.length > 0 && (
+                      <>
+                        <h3>警告</h3>
+                        <ul className="warnings-list">
+                          {healthReport.report_json.warnings.map((warning, idx) => (
+                            <li key={idx}>{warning}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {healthReport.report_json.data_gaps && healthReport.report_json.data_gaps.length > 0 && (
+                      <>
+                        <h3>数据缺口</h3>
+                        <ul className="gaps-list">
+                          {healthReport.report_json.data_gaps.map((gap, idx) => (
+                            <li key={idx}>{gap}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             ) : renderedMarkdown ? (
-              <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderedMarkdown}</ReactMarkdown>
+              </div>
             ) : (
               <div className="mini-list">
                 {healthSnapshot.takeaways.map((text, idx) => (
@@ -1032,7 +1121,7 @@ function App() {
         { key: 'docs', label: '文档类任务' },
         { key: 'i18n', label: '翻译类任务' },
       ];
-      const timelineSteps = plan?.timeline || [];
+    
 
       return (
         <div className="newcomer-wrapper">
@@ -1216,33 +1305,136 @@ function App() {
           </section>
           
           {planModalOpen && (
-            <div className="trend-modal-overlay" onClick={() => setPlanModalOpen(false)}>
-              <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="trend-modal-head">
-                  <div>
-                    <div className="eyebrow">AI 项目路线</div>
-                    <h3>推荐原因 & 行动步骤</h3>
+                  <div className="trend-modal-overlay" onClick={() => setPlanModalOpen(false)}>
+                    <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+                      <div className="trend-modal-head">
+                        <div>
+                          <div className="eyebrow">AI 项目路线</div>
+                          <h3>推荐原因 & 行动步骤</h3>
+                        </div>
+                        <button className="ghost-btn" onClick={() => setPlanModalOpen(false)}>关闭</button>
+                      </div>
+                      {newcomerReport?.report_json ? (
+                        <div className="plan-modal-body">
+                          <div className="multi-module-report">
+                            {/* 摘要卡片 */}
+                            <div className="report-summary-card">
+                              <h3>摘要</h3>
+                              <ul className="summary-bullets">
+                                {newcomerReport.report_json.summary_bullets.map((bullet, idx) => (
+                                  <li key={idx}>{bullet}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            
+                            {/* 详细部分 */}
+                            <div className="report-sections">
+                              {newcomerReport.report_json.sections.map((section, idx) => (
+                                <div key={idx} className="report-section-card">
+                                  <h3>{section.title}</h3>
+                                  <div className="section-content">
+                                    {section.content_md}
+                                  </div>
+                                  {section.evidence && section.evidence.length > 0 && (
+                                    <div className="section-evidence">
+                                      <h4>证据</h4>
+                                      <ul>
+                                        {section.evidence.map((evidence, eIdx) => (
+                                          <li key={eIdx}>
+                                            {evidence.key}: {evidence.value} {evidence.dt && `(截至 ${evidence.dt})`}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            
+                            {/* 行动建议 */}
+                            {newcomerReport.report_json.actions && newcomerReport.report_json.actions.length > 0 && (
+                              <div className="report-actions-card">
+                                <h3>行动建议</h3>
+                                {newcomerReport.report_json.actions.map((action, idx) => (
+                                  <div key={idx} className="action-item">
+                                    <div className="action-header">
+                                      <span className={`priority-badge ${action.priority.toLowerCase()}`}>{action.priority}</span>
+                                      <h4>{action.title}</h4>
+                                    </div>
+                                    <ul className="action-steps">
+                                      {action.steps.map((step, sIdx) => (
+                                        <li key={sIdx}>{step}</li>
+                                      ))}
+                                    </ul>
+                                    {action.metrics_to_watch && action.metrics_to_watch.length > 0 && (
+                                      <div className="metrics-to-watch">
+                                        <span>监控指标：</span>
+                                        {action.metrics_to_watch.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            
+                            {/* 监控指标 */}
+                            {newcomerReport.report_json.monitor && newcomerReport.report_json.monitor.length > 0 && (
+                              <div className="report-monitor-card">
+                                <h3>监控指标</h3>
+                                <ul className="monitor-list">
+                                  {newcomerReport.report_json.monitor.map((metric, idx) => (
+                                    <li key={idx}>{metric}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            
+                            {/* 警告和数据缺口 */}
+                            {(newcomerReport.report_json.warnings && newcomerReport.report_json.warnings.length > 0) || 
+                             (newcomerReport.report_json.data_gaps && newcomerReport.report_json.data_gaps.length > 0) && (
+                              <div className="report-warnings-card">
+                                {newcomerReport.report_json.warnings && newcomerReport.report_json.warnings.length > 0 && (
+                                  <>
+                                    <h3>警告</h3>
+                                    <ul className="warnings-list">
+                                      {newcomerReport.report_json.warnings.map((warning, idx) => (
+                                        <li key={idx}>{warning}</li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}
+                                {newcomerReport.report_json.data_gaps && newcomerReport.report_json.data_gaps.length > 0 && (
+                                  <>
+                                    <h3>数据缺口</h3>
+                                    <ul className="gaps-list">
+                                      {newcomerReport.report_json.data_gaps.map((gap, idx) => (
+                                        <li key={idx}>{gap}</li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : newcomerReport?.report_markdown ? (
+                        <div className="plan-modal-body markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {newcomerReport.report_markdown}
+                          </ReactMarkdown>
+                        </div>
+                      ) : planSummary ? (
+                        <div className="plan-modal-body markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {planSummary}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="loading-text">暂无路线，请先生成。</div>
+                      )}
+                    </div>
                   </div>
-                  <button className="ghost-btn" onClick={() => setPlanModalOpen(false)}>关闭</button>
-                </div>
-                {newcomerReport?.report_markdown ? (
-                  <div className="plan-modal-body markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {newcomerReport.report_markdown}
-                    </ReactMarkdown>
-                  </div>
-                ) : planSummary ? (
-                  <div className="plan-modal-body markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {planSummary}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="loading-text">暂无路线，请先生成。</div>
                 )}
-              </div>
-            </div>
-          )}
 
           {taskModalOpen && (
             <div className="trend-modal-overlay" onClick={() => setTaskModalOpen(false)}>
@@ -1286,15 +1478,130 @@ function App() {
 
     if (activeNav === 'trend') {
       return (
-        <TrendMonitor
-          repo={selectedRepo}
-          onRepoChange={(next) => {
-            setSelectedRepo(next);
-            setRepoSearch(next);
-            addToHistory(next);
-          }}
-          onRepoPinned={addToHistory}
-        />
+        <div className="analysis-wrapper">
+          {/* 使用专门的 TrendMonitor 组件显示图表数据 */}
+          <TrendMonitor repo={selectedRepo} />
+          
+          {/* 显示 AI 分析报告 */}
+          <section className="analysis-card markdown-card">
+            <div className="analysis-head">
+              <div>
+                <div className="eyebrow">AI 分析报告</div>
+                <h2>趋势监控洞察</h2>
+              </div>
+            </div>
+            {trendLoading ? (
+              <div className="loading-text">报告加载中...</div>
+            ) : trendReport?.report_json ? (
+              <div className="multi-module-report">
+                {/* 摘要卡片 */}
+                <div className="report-summary-card">
+                  <h3>摘要</h3>
+                  <ul className="summary-bullets">
+                    {trendReport.report_json.summary_bullets.map((bullet, idx) => (
+                      <li key={idx}>{bullet}</li>
+                    ))}
+                  </ul>
+                </div>
+                
+                {/* 详细部分 */}
+                <div className="report-sections">
+                  {trendReport.report_json.sections.map((section, idx) => (
+                    <div key={idx} className="report-section-card">
+                      <h3>{section.title}</h3>
+                      <div className="section-content">
+                        {section.content_md}
+                      </div>
+                      {section.evidence && section.evidence.length > 0 && (
+                        <div className="section-evidence">
+                          <h4>证据</h4>
+                          <ul>
+                            {section.evidence.map((evidence, eIdx) => (
+                              <li key={eIdx}>
+                                {evidence.key}: {evidence.value} {evidence.dt && `(截至 ${evidence.dt})`}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* 行动建议 */}
+                {trendReport.report_json.actions && trendReport.report_json.actions.length > 0 && (
+                  <div className="report-actions-card">
+                    <h3>行动建议</h3>
+                    {trendReport.report_json.actions.map((action, idx) => (
+                      <div key={idx} className="action-item">
+                        <div className="action-header">
+                          <span className={`priority-badge ${action.priority.toLowerCase()}`}>{action.priority}</span>
+                          <h4>{action.title}</h4>
+                        </div>
+                        <ul className="action-steps">
+                          {action.steps.map((step, sIdx) => (
+                            <li key={sIdx}>{step}</li>
+                          ))}
+                        </ul>
+                        {action.metrics_to_watch && action.metrics_to_watch.length > 0 && (
+                          <div className="metrics-to-watch">
+                            <span>监控指标：</span>
+                            {action.metrics_to_watch.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* 监控指标 */}
+                {trendReport.report_json.monitor && trendReport.report_json.monitor.length > 0 && (
+                  <div className="report-monitor-card">
+                    <h3>监控指标</h3>
+                    <ul className="monitor-list">
+                      {trendReport.report_json.monitor.map((metric, idx) => (
+                        <li key={idx}>{metric}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* 警告和数据缺口 */}
+                {(trendReport.report_json.warnings && trendReport.report_json.warnings.length > 0) || 
+                 (trendReport.report_json.data_gaps && trendReport.report_json.data_gaps.length > 0) && (
+                  <div className="report-warnings-card">
+                    {trendReport.report_json.warnings && trendReport.report_json.warnings.length > 0 && (
+                      <>
+                        <h3>警告</h3>
+                        <ul className="warnings-list">
+                          {trendReport.report_json.warnings.map((warning, idx) => (
+                            <li key={idx}>{warning}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {trendReport.report_json.data_gaps && trendReport.report_json.data_gaps.length > 0 && (
+                      <>
+                        <h3>数据缺口</h3>
+                        <ul className="gaps-list">
+                          {trendReport.report_json.data_gaps.map((gap, idx) => (
+                            <li key={idx}>{gap}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mini-list">
+                {alertList.map((text, idx) => (
+                  <div key={idx} className="list-row">• {text.title}</div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       );
     }
 
@@ -1374,7 +1681,7 @@ function App() {
         <aside className="nav-rail repo-rail">
           <div className="nav-rail-header">
             <div className="nav-rail-title">仓库栏</div>
-            <div className="nav-rail-sub">搜索、拉取历史、刷新当日</div>
+            <div className="nav-rail-sub">搜索仓库、拉取历史数据、刷新当日数据</div>
           </div>
 
           <div className="repo-search">

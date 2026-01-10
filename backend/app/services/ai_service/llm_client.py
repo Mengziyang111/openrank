@@ -48,8 +48,7 @@ class LLMClient:
                 "summary_bullets": [],
                 "sections": [],
                 "actions": [],
-                "monitor": [],
-                "warnings": []
+                "monitor": []
             }
 
     def _build_prompt(self, module: str, facts: Dict[str, Any], prompt_template: str) -> str:

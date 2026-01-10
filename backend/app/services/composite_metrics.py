@@ -22,9 +22,12 @@ def _percentiles(arr: List[float], q_low: float = 10.0, q_high: float = 90.0) ->
 def _normalize(raw: float | None, window_vals: List[float], high_is_good: bool) -> float | None:
     if raw is None:
         return None
+    if not window_vals:
+        return None
     p10, p90 = _percentiles(window_vals)
     if p90 == p10:
-        return None
+        # 当所有值相同时，返回中间值
+        return float(50.0 if high_is_good else 50.0)
     t = _clip01((float(raw) - p10) / (p90 - p10))
     return float((t if high_is_good else (1.0 - t)) * 100.0)
 
@@ -90,14 +93,32 @@ def compute_responsiveness_series(rows: List[Tuple[date, Dict[str, float | None]
     }
     dts, vals = _align_series(rows, keys)
     series: List[Dict[str, float | None]] = []
+    
+    # 预处理：计算每个指标的有效数据数量
+    valid_counts = {k: sum(1 for v in vals[k] if v is not None) for k in keys}
+    
     for i, dt in enumerate(dts):
         scores: Dict[str, float | None] = {}
         for k in keys:
             win = _rolling_window(vals[k], i, window_days)
             scores[k] = _normalize(vals[k][i], win, False)
+        
+        # 计算加权和，即使部分指标缺失
         comp = _weighted_sum(scores, w)
         series.append({"dt": dt, "value": comp})
-    return series, {"weights": w, "components_latest": {k: {"raw": vals[k][-1], "score": _normalize(vals[k][-1], _rolling_window(vals[k], len(dts) - 1, window_days), False)} for k in keys}}
+    
+    # 计算最新的组件分数，用于解释
+    components_latest = {}
+    for k in keys:
+        if valid_counts[k] > 0:
+            latest_val = vals[k][-1] if vals[k] and vals[k][-1] is not None else None
+            win = _rolling_window(vals[k], len(dts) - 1, window_days)
+            latest_score = _normalize(latest_val, win, False)
+            components_latest[k] = {"raw": latest_val, "score": latest_score, "valid_count": valid_counts[k]}
+        else:
+            components_latest[k] = {"raw": None, "score": None, "valid_count": 0}
+    
+    return series, {"weights": w, "components_latest": components_latest}
 
 
 def compute_resilience_series(rows: List[Tuple[date, Dict[str, float | None]]], window_days: int = 180, weights: Dict[str, float] | None = None):

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { fetchTrendDerived, fetchTrendSeries, postTrendReport, fetchCompositeTrends, fetchRiskViability, fetchTrendReport } from '../service/api';
+import { fetchTrendDerived, fetchTrendSeries, fetchCompositeTrends, fetchRiskViability } from '../service/api';
 
 const OVERVIEW_CARDS = [
   { key: 'metric_activity', title: '活跃度趋势', desc: 'commit / issue / PR 综合活跃' },
@@ -88,7 +86,7 @@ function buildLineOption(metricKey, data, derived, accent = '#2563eb', unit = ''
         data: y,
         smooth: true,
         showSymbol: false,
-        lineStyle: { color: accent, width: 3 },
+        lineStyle: { color: accent, width: 2 },
         areaStyle: { color: `${accent}1a` },
         markLine: markLines.length ? { symbol: 'none', label: { formatter: '{b}' }, data: markLines } : undefined,
       },
@@ -96,14 +94,7 @@ function buildLineOption(metricKey, data, derived, accent = '#2563eb', unit = ''
   };
 }
 
-function computeRatio(seriesMap, openKey, closeKey) {
-  const opens = seriesMap[openKey] || [];
-  const closes = seriesMap[closeKey] || [];
-  const totalOpen = opens.reduce((acc, cur) => acc + (cur.value || 0), 0);
-  const totalClose = closes.reduce((acc, cur) => acc + (cur.value || 0), 0);
-  if (!totalOpen) return null;
-  return totalClose / totalOpen;
-}
+
 
 const TIME_PRESETS = [
   { value: 180, label: '180天' },
@@ -111,27 +102,28 @@ const TIME_PRESETS = [
   { value: 'all', label: '全量' },
 ];
 
-export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
+
+export default function TrendMonitor({ repo }) {
   const [timeRange, setTimeRange] = useState(180);
   const [activeTab, setActiveTab] = useState('overview');
   const [series, setSeries] = useState([]);
   const [derived, setDerived] = useState({});
-  const [report, setReport] = useState(null);
-  const [aiReport, setAiReport] = useState(null);
   const [composite, setComposite] = useState({ series: null, kpis: null, explain: null });
   const [riskViability, setRiskViability] = useState({ kpis: null, series: null, explain: null });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [zoomOpen, setZoomOpen] = useState(false);
 
   useEffect(() => {
   }, [repo]);
 
   const dateRange = useMemo(() => {
-    if (timeRange === 'all') {
-      return { start: undefined, end: undefined };
-    }
     const end = new Date();
+    if (timeRange === 'all') {
+      // 对于全量数据，设置一个默认的起始日期（例如一年前）
+      const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000);
+      const fmt = (d) => d.toISOString().split('T')[0];
+      return { start: fmt(start), end: fmt(end) };
+    }
     const start = new Date(end.getTime() - timeRange * 24 * 60 * 60 * 1000);
     const fmt = (d) => d.toISOString().split('T')[0];
     return { start: fmt(start), end: fmt(end) };
@@ -161,8 +153,7 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
     return arr[arr.length - 1].value - arr[0].value;
   }, [seriesMap]);
 
-  const issueClosureRatio = useMemo(() => computeRatio(seriesMap, 'metric_issues_new', 'metric_issues_closed'), [seriesMap]);
-  const prClosureRatio = useMemo(() => computeRatio(seriesMap, 'metric_prs_new', 'metric_change_requests_accepted'), [seriesMap]);
+  
 
   const load = useCallback(async () => {
     if (!repo) {
@@ -173,21 +164,40 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
     setError('');
     try {
       const payload = { repo: repo, metrics: METRIC_KEYS };
-      if (dateRange.start) payload.start = dateRange.start;
-      if (dateRange.end) payload.end = dateRange.end;
+      // 全量数据时不传递start和end，让后端自动获取完整范围
+      if (timeRange !== 'all') {
+        if (dateRange.start) payload.start = dateRange.start;
+        if (dateRange.end) payload.end = dateRange.end;
+      }
       const windowDays = timeRange === 'all' ? 180 : Math.max(30, Math.min(180, Number(timeRange) || 180));
-      const [seriesRes, derivedRes, reportRes, compositeRes, riskRes, aiReportRes] = await Promise.all([
-        fetchTrendSeries(payload),
-        fetchTrendDerived({ ...payload, slope_window: timeRange === 'all' ? 30 : Math.min(14, timeRange) }),
-        postTrendReport({ repo: repo, time_window: timeRange === 'all' ? undefined : timeRange }),
-        fetchCompositeTrends({ repo: repo, start: dateRange.start, end: dateRange.end, window_days: windowDays }),
-        fetchRiskViability(repo, dateRange.start, dateRange.end),
-        fetchTrendReport(repo, timeRange === 'all' ? 180 : timeRange)
+      
+      // 构建各个API的参数
+      const seriesParams = { ...payload };
+      const derivedParams = { ...payload, slope_window: timeRange === 'all' ? 30 : Math.min(14, timeRange) };
+      const compositeParams = { 
+        repo: repo, 
+        window_days: windowDays 
+      };
+      if (timeRange !== 'all') {
+        if (dateRange.start) compositeParams.start = dateRange.start;
+        if (dateRange.end) compositeParams.end = dateRange.end;
+      }
+      
+      // 构建风险可行性参数
+      const riskParams = { repo };
+      if (timeRange !== 'all') {
+        if (dateRange.start) riskParams.start = dateRange.start;
+        if (dateRange.end) riskParams.end = dateRange.end;
+      }
+      
+      const [seriesRes, derivedRes, compositeRes, riskRes] = await Promise.all([
+        fetchTrendSeries(seriesParams),
+        fetchTrendDerived(derivedParams),
+        fetchCompositeTrends(compositeParams),
+        fetchRiskViability(riskParams.repo, riskParams.start, riskParams.end)
       ]);
       setSeries(seriesRes.series || seriesRes.data?.series || []);
       setDerived(derivedRes.derived || derivedRes.data?.derived || {});
-      setReport(reportRes.report ? reportRes : reportRes.data || reportRes);
-      setAiReport(aiReportRes);
       setComposite({
         series: compositeRes.series || compositeRes.data?.series,
         kpis: compositeRes.kpis || compositeRes.data?.kpis,
@@ -211,46 +221,8 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
     load();
   }, [load]);
 
-  const reportMarkdown = useMemo(() => {
-    // 优先使用AI报告
-    if (aiReport?.report_markdown) {
-      return aiReport.report_markdown;
-    }
-    
-    // 回退到旧报告
-    if (!report?.report) return '';
-    const r = report.report;
-    const lines = [];
-    lines.push('## Identify');
-    if (r.identify) lines.push(r.identify, '');
-
-    lines.push('## Diagnosis');
-    (r.diagnosis || []).forEach((d) => lines.push(`- ${d}`));
-    lines.push('');
-
-    lines.push('## Need Data?');
-    (r.need_data || []).forEach((d) => lines.push(`- ${d}`));
-    lines.push('');
-
-    lines.push('## Improvements');
-    (r.improvements || []).forEach((d) => lines.push(`- ${d}`));
-    lines.push('');
-
-    lines.push('## Monitor');
-    (r.monitor || []).forEach((m) => {
-      const label = CHAOSS_LABELS[m] || m;
-      lines.push(`- ${label}`);
-    });
-    lines.push('');
-
-    lines.push('## Closure / Merge Ratio');
-    lines.push(`- Issues: ${formatNumber(issueClosureRatio, '')}`);
-    lines.push(`- PR: ${formatNumber(prClosureRatio, '')}`);
-    return lines.join('\n');
-  }, [aiReport, report, issueClosureRatio, prClosureRatio]);
-
   const renderStatsRow = (items) => (
-    <div className="trend-stat-row">
+    <>
       {items.map((item) => {
         const val = latestValue(item.key);
         const diff = delta(item.key);
@@ -264,11 +236,11 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
           </div>
         );
       })}
-    </div>
+    </>
   );
 
   const renderChartGrid = (items, accent = '#2563eb') => (
-    <div className="trend-chart-grid">
+    <>
       {items.map((item) => (
         <div key={item.key} className="chart-card">
           <div className="chart-head">
@@ -285,7 +257,7 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
           />
         </div>
       ))}
-    </div>
+    </>
   );
 
   return (
@@ -387,71 +359,34 @@ export default function TrendMonitor({ repo, onRepoChange, onRepoPinned }) {
               );
             })}
           </div>
-
-          <section className="analysis-card markdown-card">
-            <div className="analysis-head">
-              <div>
-                <div className="eyebrow">AI 趋势解读</div>
-                <h2>Markdown 格式洞察</h2>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="chip">时间窗：{timeRange} 天</div>
-                <button className="ghost-btn" onClick={() => setZoomOpen(true)} title="放大查看">⤢</button>
-              </div>
-            </div>
-            {report ? (
-              reportMarkdown ? (
-                <div className="markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportMarkdown}</ReactMarkdown>
-                </div>
-              ) : (
-                <div className="loading-text">暂无报告内容</div>
-              )
-            ) : (
-              <div className="loading-text">报告生成中...</div>
-            )}
-          </section>
-
-          {zoomOpen && (
-            <div className="trend-modal-overlay" onClick={() => setZoomOpen(false)}>
-              <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="trend-modal-head">
-                  <div>
-                    <div className="eyebrow">AI 趋势解读</div>
-                    <h3>报告放大查看</h3>
-                  </div>
-                  <button className="ghost-btn" onClick={() => setZoomOpen(false)}>关闭</button>
-                </div>
-                {reportMarkdown ? (
-                  <div className="plan-modal-body markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportMarkdown}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="loading-text">暂无报告内容</div>
-                )}
-              </div>
-            </div>
-          )}
         </>
       )}
 
       {!loading && activeTab === 'responsiveness' && (
         <>
-          {renderStatsRow(RESPONSIVENESS_METRICS.slice(0, 2))}
-          {renderStatsRow(RESPONSIVENESS_METRICS.slice(2))}
+          <div className="responsiveness-stats">
+            {renderStatsRow(RESPONSIVENESS_METRICS.slice(0, 2))}
+            {renderStatsRow(RESPONSIVENESS_METRICS.slice(2))}
+          </div>
           <div className="trend-meta-row">
             <div className="stat-chip">48h 内响应占比：{formatNumber(derived?.metric_pr_response_time_h?.response_ratio_48h, '')}</div>
             <div className="stat-chip">Issue 48h 占比：{formatNumber(derived?.metric_issue_response_time_h?.response_ratio_48h, '')}</div>
           </div>
-          {renderChartGrid(RESPONSIVENESS_METRICS, '#f97316')}
+          <div className="responsiveness-charts">
+            {renderChartGrid(RESPONSIVENESS_METRICS, '#f97316')}
+          </div>
         </>
       )}
 
       {!loading && activeTab === 'activity' && (
         <>
-          {renderStatsRow(ACTIVITY_METRICS.slice(0, 3))}
-          {renderStatsRow(ACTIVITY_METRICS.slice(3))}
-          {renderChartGrid(ACTIVITY_METRICS, '#2563eb')}
+          <div className="activity-stats">
+            {renderStatsRow(ACTIVITY_METRICS.slice(0, 3))}
+            {renderStatsRow(ACTIVITY_METRICS.slice(3))}
+          </div>
+          <div className="activity-charts">
+            {renderChartGrid(ACTIVITY_METRICS, '#2563eb')}
+          </div>
         </>
       )}
 

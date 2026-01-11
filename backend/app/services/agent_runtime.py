@@ -62,6 +62,9 @@ def _extract_piece(obj: Dict[str, Any]) -> str:
 
 
 async def run_agent(req: AgentRequest, db=None) -> AgentResponse:
+	# 添加日志记录，检查接收到的参数
+	logger.info("收到agent请求: query=%s, selected_repo=%s, messages=%s", req.query, req.selected_repo, len(req.messages))
+	
 	api_key = settings.MAXKB_API_KEY
 	if not api_key:
 		return AgentResponse(report=Report(text="MaxKB_API_KEY not set"), tool_results=[])
@@ -72,25 +75,46 @@ async def run_agent(req: AgentRequest, db=None) -> AgentResponse:
 		"Content-Type": "application/json",
 	}
 
-	messages: List[Msg] = req.messages or [Msg(role="user", content=req.query)]
-
-	# Repo selection: prefer repo mentioned in user query over selected_repo
-	repo_mentioned = _extract_repo_mentioned(req.query)
-	repo_for_link = repo_mentioned or req.selected_repo
+	# 1. 优先使用selected_repo
+	repo = req.selected_repo
+	logger.info("使用的仓库: %s", repo)
+	
+	# 2. 构建基础用户消息
+	user_msg = Msg(role="user", content=req.query)
+	
+	# 3. 构建系统消息，只传递必要的仓库信息
+	system_content = ""
+	
+	# 4. 如果有仓库，传递仓库信息和dashboard链接
 	dashboard_url: Optional[str] = None
-	if repo_for_link:
+	if repo:
+		# 传递仓库信息
+		system_content += f"仓库: {repo}\n"
+		# 构建dashboard链接
 		try:
-			dashboard_url = build_dashboard_link(settings.DATAEASE_PUBLIC_BASE_URL or settings.DATAEASE_BASE_URL, repo_for_link)
-		except Exception as e:  # pragma: no cover
+			dashboard_url = build_dashboard_link(settings.DATAEASE_PUBLIC_BASE_URL or settings.DATAEASE_BASE_URL, repo)
+			if dashboard_url:
+				system_content += f"数据大屏链接: {dashboard_url}\n"
+		except Exception as e:
 			logger.warning("build_dashboard_link failed: %s", e)
-
-	# Surface repo choice to the model for consistency
-	if repo_for_link:
-		repo_source = "用户文本" if repo_mentioned else "选择器"
-		messages.insert(0, Msg(role="system", content=f"使用仓库：{repo_for_link}（来源：{repo_source}）"))
-
-	if dashboard_url:
-		messages.append(Msg(role="assistant", content=f"DataEase 健康总览大屏：{dashboard_url}"))
+	
+	# 5. 构建最终消息列表，只包含相关的历史消息和当前用户消息
+	messages = []
+	
+	# 添加历史消息，过滤掉系统消息和初始欢迎消息
+	for msg in req.messages:
+		# 过滤掉系统消息
+		if msg.role == "system":
+			continue
+		# 过滤掉初始欢迎消息
+		if msg.role == "assistant" and "你好，我是 OpenRank Agent" in msg.content:
+			continue
+		messages.append(msg)
+	
+	# 添加当前用户消息
+	messages.append(user_msg)
+	
+	logger.info("构建的消息列表: %s", messages)
 
 	# Prefer request -> .env -> inferred app_id; final fallback uses qwen3-max to match your MaxKB base model
 	model = req.model or settings.MAXKB_MODEL or _infer_model_from_base() or "qwen3-max"
@@ -171,13 +195,16 @@ async def run_agent(req: AgentRequest, db=None) -> AgentResponse:
 		if not final_text:
 			final_text = "(empty response)"
 
-		# Ensure dashboard link is surfaced in the text reply for the UI
-		if dashboard_url and "DataEase 健康总览大屏" not in final_text:
-			final_text = f"{final_text}\n\nDataEase 健康总览大屏：{dashboard_url}"
+		# 不再强制追加链接，让 AI 根据上下文自然回答
+		# 如果 AI 的回答中没有提到数据大屏，且用户可能对此感兴趣，可以在回答末尾添加
+		# 但不要强制添加，让 AI 自己决定是否需要提及
+		# 注释掉自动追加，避免 AI 误以为这是它必须回答的内容
+		# if dashboard_url and "DataEase" not in final_text and "大屏" not in final_text:
+		#     final_text = f"{final_text}\n\n💡 提示：你可以通过 [数据大屏]({dashboard_url}) 查看更详细的可视化数据。"
 
 		tool_results: List[Dict[str, Any]] = []
 		if dashboard_url:
-			tool_results.append({"type": "dashboard_url", "repo": repo_for_link, "url": dashboard_url})
+			tool_results.append({"type": "dashboard_url", "repo": repo, "url": dashboard_url})
 
 		return AgentResponse(report=Report(text=final_text), tool_results=tool_results)
 

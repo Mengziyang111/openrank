@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     Text,
     Date,
     Float,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     func,
     JSON,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from app.db.base import Base
@@ -158,16 +160,7 @@ class Alert(Base):
     evidence_json = Column(JSONType)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-class RepoCatalog(Base):
-    __tablename__ = "repo_catalog"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    repo = Column(Text, nullable=False, unique=True, index=True)
-    domain = Column(Text)
-    language = Column(Text)
-    tags_json = Column(JSONType)
-    difficulty = Column(Integer)
-    tech_family = Column(Text)
-    notes = Column(Text)
+from app.models import RepoCatalog, RepoDoc, RepoIssue
 
 
 class DataEaseBinding(Base):

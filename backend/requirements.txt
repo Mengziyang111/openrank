@@ -25,3 +25,6 @@ tenacity>=8.2,<9.0
 
 # Graph analytics（生态治理/协作结构加分项，纯 Python 很稳）
 networkx>=3.3,<4.0
+
+# Math/Stats for trend analysis
+numpy>=1.24,<3.0

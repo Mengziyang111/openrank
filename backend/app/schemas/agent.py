@@ -20,7 +20,7 @@ class AgentRequest(BaseModel):
 	model: Optional[str] = None
 	stream: Optional[bool] = False
 	temperature: Optional[float] = 0.2
-	max_tokens: Optional[int] = 1024
+	max_tokens: Optional[int] = 4096
 
 
 class AgentResponse(BaseModel):

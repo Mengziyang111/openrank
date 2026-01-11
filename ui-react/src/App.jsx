@@ -1,28 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { marked } from 'marked';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './App.css';
+import TrendMonitor from './pages/TrendMonitor';
 import {
-  postAgentRun,
   refreshTodayHealth,
+  refreshHealth,
   fetchLatestHealthOverview,
   fetchDataEaseDashboardUrl,
+  postNewcomerPlan,
+  fetchNewcomerIssues,
+  postTaskBundle,
   fetchTrend,
+  bootstrapHealth,
+  fetchHealthReport,
+  fetchNewcomerReport,
+  fetchTrendReport,
+  postAgentRun,
 } from './service/api';
 
 const navItems = [
   { key: 'ai', label: 'AI 聊天', note: '主界面' },
-  { key: 'health', label: '健康体检', note: '健康分与雷达' },
-  { key: 'benchmark', label: '对标分析', note: '同类分位' },
-  { key: 'trend', label: '趋势预测', note: '趋势预估' },
-  { key: 'actions', label: '行动中心', note: '治理清单' },
-  { key: 'alerts', label: '风险预警', note: '实时提示' },
-];
+  { key: 'health', label: '健康体检', note: '指标与报告' },
+  { key: 'benchmark', label: '开源新人', note: '贡献导航' },
+  { key: 'trend', label: '趋势监控', note: '趋势解读' },
 
-const conversations = [
-  { id: 'conv-1', repo: 'microsoft/vscode', tag: '默认' },
-  { id: 'conv-2', repo: 'facebook/react', tag: '示例' },
-  { id: 'conv-3', repo: 'vuejs/core', tag: '示例' },
 ];
 
 const quickPrompts = [
@@ -43,55 +47,59 @@ const healthSnapshot = {
     { label: '风险', value: 81 },
   ],
   takeaways: [
-    '活跃度稳定，但响应维度偏弱，主要是 issue 首响偏慢。',
-    '治理分高，社区规约齐全，Scorecard 得分 8.1。',
-    '风险集中在 backlog age 和 bus factor，需要关注核心贡献者占比。',
+    '项目保持稳定活跃，OpenRank 持续上升。',
+    '响应度略低，建议关注 issue 回复及时性。',
+    '治理能力较强，可继续优化风险监测。',
   ],
 };
-
-const benchmarkCards = [
-  { title: '健康分分位', detail: '第 65 分位 · 响应度拖后腿' },
-  { title: '关键差距', detail: '首响中位数 28h · backlog age 32 天' },
-  { title: '对标仓库', detail: 'facebook/react · vuejs/core · angular/angular' },
-];
-
-const actionTasks = [
-  { title: 'Triage 本周新增 issue，设定首响负责人', impact: '响应度 ↑', effort: 'S' },
-  { title: '清理 age>30 天 backlog，先处理 top10', impact: '韧性 ↑', effort: 'M' },
-  { title: '发布 contributor guide 与模板，降低新人门槛', impact: '治理 ↑', effort: 'M' },
-  { title: '轮值值班表，确保 24h 首响', impact: '响应度 ↑', effort: 'S' },
-];
-
-const alertList = [
-  { title: '响应度预警：首响中位数 > 24h', time: '今天 09:12', level: 'high' },
-  { title: 'Backlog age > 30 天的 issue 12 个', time: '昨天 18:20', level: 'medium' },
-  { title: 'Bus factor 风险：top1 占比 46%', time: '本周', level: 'medium' },
-  { title: '活跃度周环比 -12%', time: '本周', level: 'low' },
-];
 
 const initialMessages = [
   {
     id: 'm-1',
     role: 'assistant',
-    text: '你好，我是 OpenRank Agent。告诉我你的仓库和需求，我会给出健康体检、对标、治理建议或风险预警。',
+    text: `🎉 欢迎使用 OpenSage AI —— 这一刻，数据拥有了预测未来的能力。
+
+我由华东师范大学 "爱错"团队 研发，不仅是查库工具，更是您的 开源治理数字参谋。深度融合 OpenDigger 实时数据 与 MaxKB 专家智库，打破了“只看数据，不懂决策”的壁垒。
+
+## 🚀 核心优势（为什么选择我？）
+- 📐 行业标尺：内置全域项目 P50/P80 水位线，一眼看清项目处于行业头部还是尾部。
+- 🔮 趋势预演：独创 时序预测算法，基于历史数据科学推演未来 30 天的走势。
+- 🧠 算法评分：不仅仅是列数字，更通过 Readiness Score 等模型量化评估项目对新人的友好度。
+
+## 🌟 您可以这样问我（覆盖四大核心场景）
+### 👨‍💻 项目体检 & 预测（维护者）
+- "帮我分析 odoo/odoo 的健康状况，预测下个月活跃度是涨是跌？"
+- "为什么 Bus Factor 降低了？给我具体的治理建议。"
+
+### 🏢 战略决策 & 对标（OSPO/决策者）
+- "帮我评估引入 microsoft/vscode 的 ROI，它的各项指标在行业里算 Top 级吗？"
+- "生成一份包含长期趋势分析的深度治理报告。"
+
+### 🧑‍🎓 新手领航 & 评分（开发者）
+- "我对 Python 感兴趣，tensorflow 这个项目对新人友好吗？上手难度打几分？"
+- "帮我规划一条参与 LangChain 贡献的最佳路径。"
+
+> 注：法律合规咨询功能暂未上线
+
+### ⚖️ 技术选型 & PK（架构师）
+- "对比 microsoft/vscode 和 odoo/odoo 的响应速度与社区韧性，谁更适合长期依赖？"
+
+📈 数据不只是数字，更是行动的指南。
+请告诉我想分析的仓库名（如 odoo/odoo），我们开始吧 👇`,
   },
 ];
 
-function formatAssistantReply(payload) {
-  if (!payload) return '已处理，稍后再试试。';
-  const parts = [];
-  if (payload.summary?.headline) parts.push(payload.summary.headline);
-  if (payload.summary?.key_points?.length) {
-    parts.push(payload.summary.key_points.map((p) => `- ${p}`).join('\n'));
-  }
-  if (payload.actions?.length) {
-    parts.push('行动建议：\n' + payload.actions.map((a) => `- [${a.priority || 'P1'}] ${a.action}`).join('\n'));
-  }
-  if (payload.links?.length) {
-    parts.push('相关链接：\n' + payload.links.map((l) => `- ${l}`).join('\n'));
-  }
-  return parts.filter(Boolean).join('\n\n');
-}
+const actionTasks = [
+  { title: '提升响应度：Issue 首响 < 24h', impact: '高影响', effort: '中' },
+  { title: '治理欠缺：补充安全扫描 + License 检查', impact: '中影响', effort: '中' },
+  { title: '社区活跃：安排每周 triage & 新人引导', impact: '中影响', effort: '低' },
+];
+
+const alertList = [
+  { title: '响应度连续下降 14 天', level: 'high', time: '2h 前' },
+  { title: 'OpenRank 波动 > 15%', level: 'medium', time: '1 天前' },
+  { title: 'Top5 贡献占比 82%', level: 'medium', time: '3 天前' },
+];
 
 function pickMarkdown(payload) {
   const candidates = [
@@ -138,25 +146,68 @@ function App() {
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState('microsoft/vscode');
+  const [domain, setDomain] = useState('frontend');
+  const [stack, setStack] = useState('javascript');
+  const [timePerWeek, setTimePerWeek] = useState('1-2h');
+  const [plan, setPlan] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState('');
+  const [activeTaskTab, setActiveTaskTab] = useState('good_first_issue');
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [issuesBoard, setIssuesBoard] = useState(null);
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [activeIssuesRepo, setActiveIssuesRepo] = useState(null);
+  const [taskBundle, setTaskBundle] = useState(null);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskLoading, setTaskLoading] = useState(false);
+  const [taskError, setTaskError] = useState('');
+  
+  // 添加调试信息，监听selectedRepo变化
+  useEffect(() => {
+    console.log('selectedRepo变化:', selectedRepo);
+  }, [selectedRepo]);
+
+  useEffect(() => {
+    if (plan?.recommended_repos?.length) {
+      setActiveIssuesRepo(plan.recommended_repos[0].repo_full_name);
+      setIssuesBoard(plan.issues_board || null);
+    }
+  }, [plan]);
   const [activeNav, setActiveNav] = useState('ai');
   const [healthOverview, setHealthOverview] = useState(null);
   const [healthMarkdown, setHealthMarkdown] = useState('');
   const [healthLoading, setHealthLoading] = useState(false);
-  const [healthError, setHealthError] = useState('');
   const [riskLabel, setRiskLabel] = useState(null);
   const [dataEaseLink, setDataEaseLink] = useState('');
   const [linkError, setLinkError] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
   const [copyTip, setCopyTip] = useState('');
+  const [repoSearch, setRepoSearch] = useState('');
+  const [repoActionMsg, setRepoActionMsg] = useState('');
+  const [etlLoading, setEtlLoading] = useState(false);
+  const [refreshOneLoading, setRefreshOneLoading] = useState(false);
   const [showTrendModal, setShowTrendModal] = useState(false);
   const [activeMetric, setActiveMetric] = useState(null);
   const [trendSeries, setTrendSeries] = useState([]);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendError, setTrendError] = useState('');
+  const [historyRepos, setHistoryRepos] = useState([{ id: 'hist-1', repo: 'microsoft/vscode', tag: '历史' }]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [healthReport, setHealthReport] = useState(null);
+  const [newcomerReport, setNewcomerReport] = useState(null);
+  const [trendReport, setTrendReport] = useState(null);
   const listEndRef = useRef(null);
   const trendChartRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
   const attachParams = useMemo(() => (selectedRepo ? buildAttachParams(selectedRepo) : ''), [selectedRepo]);
+
+  const filteredRepos = useMemo(() => {
+    const term = repoSearch.trim().toLowerCase();
+    let allRepos = [...historyRepos];
+    if (!term) return allRepos;
+    return allRepos.filter((c) => c.repo.toLowerCase().includes(term) || (c.tag || '').toLowerCase().includes(term));
+  }, [repoSearch, historyRepos]);
 
   const currentScore = useMemo(() => {
     const raw = healthOverview?.score_health ?? healthSnapshot.score;
@@ -245,21 +296,27 @@ function App() {
   const loadHealthOverview = useCallback(async () => {
     if (!selectedRepo) return;
     setHealthLoading(true);
-    setHealthError('');
     setRiskLabel(null);
     try {
-      const res = await fetchLatestHealthOverview(selectedRepo);
-      const payload = res?.data || res;
+      const [overviewRes, reportRes] = await Promise.all([
+        fetchLatestHealthOverview(selectedRepo),
+        fetchHealthReport(selectedRepo)
+      ]);
+      
+      const payload = overviewRes?.data || overviewRes;
       setHealthOverview(payload);
       setHealthMarkdown(pickMarkdown(payload));
+      setHealthReport(reportRes);
+      
       const top5 = extractTop5Share(payload);
       if (top5 !== null && top5 > 80) {
         setRiskLabel(`风险预警：Top5 贡献占比 ${top5.toFixed(1)}%`);
       }
     } catch (err) {
-      setHealthError(err?.message || '加载健康数据失败');
+      console.error('加载健康数据失败:', err);
       setHealthOverview(null);
       setHealthMarkdown('');
+      setHealthReport(null);
     } finally {
       setHealthLoading(false);
     }
@@ -455,6 +512,9 @@ function App() {
     const trimmed = input.trim();
     if (!trimmed || sending) return;
 
+    // 添加调试信息，确保selectedRepo被正确设置
+    console.log('发送消息，当前仓库:', selectedRepo);
+
     const userMessage = { id: `${Date.now()}-u`, role: 'user', text: trimmed };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
@@ -463,13 +523,16 @@ function App() {
     try {
       const res = await postAgentRun({
         query: trimmed,
-        selected_repo: selectedRepo || null,
-        messages: [],
+        selected_repo: selectedRepo,
+        // 传递完整的历史消息，确保上下文正确
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.text
+        })),
       });
 
-      const reply =
+      const reply = 
         res?.report?.text ||
-        formatAssistantReply(res?.tool_results?.length ? res : null) ||
         '已处理，稍后再试试。';
 
       setMessages((prev) => [...prev, { id: `${Date.now()}-a`, role: 'assistant', text: reply }]);
@@ -487,8 +550,17 @@ function App() {
     setInput(prompt);
   };
 
-  const handleSelectConversation = (repo) => {
-    setSelectedRepo(repo);
+  const addToHistory = (repo) => {
+    if (!repo) return;
+    setHistoryRepos(prev => {
+      // 检查是否已存在，避免重复
+      if (prev.some(item => item.repo === repo)) {
+        // 如果已存在，移到最前面
+        return [{ id: `hist-${Date.now()}`, repo, tag: '历史' }, ...prev.filter(item => item.repo !== repo)];
+      }
+      // 否则添加到最前面，最多保留10条
+      return [{ id: `hist-${Date.now()}`, repo, tag: '历史' }, ...prev.slice(0, 9)];
+    });
   };
 
   const handleNavClick = (key) => {
@@ -513,6 +585,47 @@ function App() {
       setRefreshing(false);
     }
   };
+
+  const currentRepoInput = useMemo(() => repoSearch.trim() || selectedRepo, [repoSearch, selectedRepo]);
+
+  const handleEtlRepo = useCallback(async () => {
+    const repo = currentRepoInput;
+    if (!repo) {
+      setRepoActionMsg('请输入或选择仓库');
+      return;
+    }
+    setEtlLoading(true);
+    setRepoActionMsg('');
+    try {
+      const res = await bootstrapHealth(repo);
+      setRepoActionMsg(`已拉取历史指标：${res?.data?.repo || repo}`);
+      setSelectedRepo(repo);
+    } catch (err) {
+      setRepoActionMsg(err?.message || '拉取失败');
+    } finally {
+      setEtlLoading(false);
+    }
+  }, [currentRepoInput]);
+
+  const handleRefreshRepo = useCallback(async () => {
+    const repo = currentRepoInput;
+    if (!repo) {
+      setRepoActionMsg('请输入或选择仓库');
+      return;
+    }
+    setRefreshOneLoading(true);
+    setRepoActionMsg('');
+    try {
+      const res = await refreshHealth(repo);
+      const dtValue = res?.data?.dt || res?.data?.date || 'today';
+      setRepoActionMsg(`已刷新 ${repo} - ${dtValue}`);
+      setSelectedRepo(repo);
+    } catch (err) {
+      setRepoActionMsg(err?.message || '刷新失败');
+    } finally {
+      setRefreshOneLoading(false);
+    }
+  }, [currentRepoInput]);
 
   const loadTrend = useCallback(
     async (metric) => {
@@ -548,6 +661,142 @@ function App() {
     [selectedRepo],
   );
 
+  const loadTrendReport = useCallback(async () => {
+    if (!selectedRepo) return;
+    setTrendLoading(true);
+    setTrendError('');
+    try {
+      const reportRes = await fetchTrendReport(selectedRepo);
+      setTrendReport(reportRes);
+    } catch (err) {
+      setTrendError(err?.message || '趋势报告加载失败');
+      setTrendReport(null);
+    } finally {
+      setTrendLoading(false);
+    }
+  }, [selectedRepo]);
+
+  useEffect(() => {
+    if (activeNav === 'trend') {
+      loadTrendReport();
+    }
+  }, [activeNav, loadTrendReport]);
+
+  const handleGeneratePlan = useCallback(async () => {
+    setPlanLoading(true);
+    setPlanError('');
+    try {
+      const [planRes, reportRes] = await Promise.all([
+        postNewcomerPlan({
+          domain,
+          stack,
+          time_per_week: timePerWeek,
+        }),
+        fetchNewcomerReport(domain, stack, timePerWeek)
+      ]);
+      
+      setPlan(planRes);
+      setNewcomerReport(reportRes);
+      setIssuesBoard(planRes?.issues_board || null);
+      const firstRepo = planRes?.recommended_repos?.[0]?.repo_full_name;
+      setActiveIssuesRepo(firstRepo || null);
+      setActiveTaskTab('good_first_issue');
+      setPlanModalOpen(true);
+      return planRes;
+    } catch (err) {
+      setPlan(null);
+      setNewcomerReport(null);
+      setPlanError(err?.message || '生成失败，请稍后再试');
+      return null;
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [domain, stack, timePerWeek]);
+
+  const handleSwitchIssuesRepo = useCallback(
+    async (repoName, readiness = 60) => {
+      if (!repoName) return;
+      setIssuesLoading(true);
+      setActiveIssuesRepo(repoName);
+      try {
+        const res = await fetchNewcomerIssues(repoName, readiness);
+        setIssuesBoard(res);
+      } catch (err) {
+        setPlanError(err?.message || '任务看板加载失败');
+      } finally {
+        setIssuesLoading(false);
+      }
+    },
+    [],
+  );
+
+  const handleShowRoute = useCallback(async () => {
+    if (!plan) {
+      const res = await handleGeneratePlan();
+      if (!res) return;
+    }
+    setPlanModalOpen(true);
+  }, [handleGeneratePlan, plan]);
+
+  async function handleClaimTask(task) {
+    if (!task) return;
+    setTaskLoading(true);
+    setTaskError('');
+    try {
+      const res = await postTaskBundle({
+        repo_full_name: task.repo_full_name,
+        issue_identifier: task.issue_number || task.url || task.title,
+      });
+      setTaskBundle(res);
+      setTaskModalOpen(true);
+    } catch (err) {
+      setTaskError(err?.message || '领取失败，请稍后再试');
+    } finally {
+      setTaskLoading(false);
+    }
+  }
+
+
+
+  const handleCopyTaskBundle = useCallback(async () => {
+    if (!taskBundle?.copyable_checklist) return;
+    try {
+      await navigator.clipboard.writeText(taskBundle.copyable_checklist);
+    } catch (err) {
+      setTaskError(err?.message || '复制失败');
+    }
+  }, [taskBundle]);
+
+
+  const planSummary = useMemo(() => {
+    if (!plan?.recommended_repos?.length) return '';
+    const top = plan.recommended_repos[0];
+    const reasons = top.reasons || [];
+    const trend = typeof top.trend_delta === 'number' ? `${top.trend_delta >= 0 ? '+' : ''}${top.trend_delta}%` : '';
+    const readiness = top.readiness_score !== undefined ? Math.round(top.readiness_score) : undefined;
+    const fit = top.fit_score !== undefined ? Math.round(top.fit_score) : undefined;
+    const timeline = plan.timeline || [];
+
+    return [
+      '## 推荐仓库',
+      `- 仓库：${top.repo_full_name || top.name || ''}`,
+      `- 匹配度（Fit）：${fit ?? '--'}% ｜ 新手就绪度：${readiness ?? '--'}%` + (trend ? ` ｜ 近30天趋势：${trend}` : ''),
+      top.difficulty ? `- 上手难度：${top.difficulty}` : null,
+      '',
+      '## 推荐理由',
+      ...reasons.slice(0, 5).map((r) => `- ${r}`),
+      '',
+      '## 贡献路径',
+      ...timeline.map((step) => `- ${step.title}: ${(step.commands || []).join(' ｜ ')}`),
+      '',
+      '## 复制命令',
+      plan.copyable_checklist ? plan.copyable_checklist.split('\n').map((l) => l) : [],
+    ]
+      .flat()
+      .filter(Boolean)
+      .join('\n');
+  }, [plan]);
+
   const handleMetricClick = (metric) => {
     setActiveMetric(metric);
     setShowTrendModal(true);
@@ -569,6 +818,11 @@ function App() {
     setTrendError('');
   };
 
+  // 全屏切换函数
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
+  };
+
   const renderPageContent = () => {
     if (activeNav === 'ai') return null;
 
@@ -585,15 +839,16 @@ function App() {
             <div className="health-hero" style={{ '--theme-color': themeColor }}>
               <div className="health-head-row">
                 <div className="health-head-info">
-                  <div className="eyebrow">健康体检</div>
+                  <div className="eyebrow health-eyebrow">健康体检</div>
                   <div className="health-head-title">数据总览</div>
+                  <p className="health-head-desc">一屏看活跃 · 响应 · 韧性 · 治理 · 安全五维体检</p>
                 </div>
               </div>
               <div className="health-hero-grid two-columns">
                 <div className="gauge-panel">
                   <div className="chart-title">健康总分</div>
                   <div className="gauge-box">
-                    <ReactECharts option={healthGaugeOption} style={{ height: 260, width: '100%' }} />
+                    <ReactECharts option={healthGaugeOption} opts={{ useResizeObserver: false }} style={{ height: 260, width: '100%' }} />
                   </div>
                   <div className="legend-row legend-compact">
                     <span className="legend-dot green" /> 绿 ≥85
@@ -608,7 +863,7 @@ function App() {
                     {healthLoading ? (
                       <div className="loading-text">雷达图加载中...</div>
                     ) : (
-                      <ReactECharts option={healthRadarOption} style={{ height: 360 }} />
+                      <ReactECharts option={healthRadarOption} opts={{ useResizeObserver: false }} style={{ height: 360 }} />
                     )}
                   </div>
                 </div>
@@ -616,7 +871,7 @@ function App() {
             </div>
 
             <div className="export-hero-card">
-              <div className="export-hero-text">已根据当前仓库配置动态生成 attachParams 参数</div>
+
               {!dataEaseLink ? (
                 <button
                   className={`export-main-btn ${linkLoading ? 'loading' : ''}`}
@@ -665,14 +920,117 @@ function App() {
           <section className="analysis-card markdown-card">
             <div className="analysis-head">
               <div>
-                <div className="eyebrow">分析报告</div>
-                <h2>Markdown 格式洞察</h2>
+                <div className="eyebrow">AI 分析报告</div>
+                <h2>多模块洞察</h2>
               </div>
             </div>
             {healthLoading ? (
               <div className="loading-text">报告加载中...</div>
+            ) : healthReport?.report_json ? (
+              <div className="multi-module-report">
+                {/* 摘要卡片 */}
+                <div className="report-summary-card">
+                  <h3>摘要</h3>
+                  <ul className="summary-bullets">
+                    {healthReport.report_json.summary_bullets.map((bullet, idx) => (
+                      <li key={idx}>{bullet}</li>
+                    ))}
+                  </ul>
+                </div>
+                
+                {/* 详细部分 */}
+                <div className="report-sections">
+                  {healthReport.report_json.sections.map((section, idx) => (
+                    <div key={idx} className="report-section-card">
+                      <h3>{section.title}</h3>
+                      <div className="section-content">
+                        {section.content_md}
+                      </div>
+                      {section.evidence && section.evidence.length > 0 && (
+                        <div className="section-evidence">
+                          <h4>证据</h4>
+                          <ul>
+                            {section.evidence.map((evidence, eIdx) => (
+                              <li key={eIdx}>
+                                {evidence.key}: {evidence.value} {evidence.dt && `(截至 ${evidence.dt})`}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* 行动建议 */}
+                {healthReport.report_json.actions && healthReport.report_json.actions.length > 0 && (
+                  <div className="report-actions-card">
+                    <h3>行动建议</h3>
+                    {healthReport.report_json.actions.map((action, idx) => (
+                      <div key={idx} className="action-item">
+                        <div className="action-header">
+                          <span className={`priority-badge ${action.priority.toLowerCase()}`}>{action.priority}</span>
+                          <h4>{action.title}</h4>
+                        </div>
+                        <ul className="action-steps">
+                          {action.steps.map((step, sIdx) => (
+                            <li key={sIdx}>{step}</li>
+                          ))}
+                        </ul>
+                        {action.metrics_to_watch && action.metrics_to_watch.length > 0 && (
+                          <div className="metrics-to-watch">
+                            <span>监控指标：</span>
+                            {action.metrics_to_watch.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* 监控指标 */}
+                {healthReport.report_json.monitor && healthReport.report_json.monitor.length > 0 && (
+                  <div className="report-monitor-card">
+                    <h3>监控指标</h3>
+                    <ul className="monitor-list">
+                      {healthReport.report_json.monitor.map((metric, idx) => (
+                        <li key={idx}>{metric}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* 警告和数据缺口 */}
+                {(healthReport.report_json.warnings && healthReport.report_json.warnings.length > 0) || 
+                 (healthReport.report_json.data_gaps && healthReport.report_json.data_gaps.length > 0) && (
+                  <div className="report-warnings-card">
+                    {healthReport.report_json.warnings && healthReport.report_json.warnings.length > 0 && (
+                      <>
+                        <h3>警告</h3>
+                        <ul className="warnings-list">
+                          {healthReport.report_json.warnings.map((warning, idx) => (
+                            <li key={idx}>{warning}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {healthReport.report_json.data_gaps && healthReport.report_json.data_gaps.length > 0 && (
+                      <>
+                        <h3>数据缺口</h3>
+                        <ul className="gaps-list">
+                          {healthReport.report_json.data_gaps.map((gap, idx) => (
+                            <li key={idx}>{gap}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : renderedMarkdown ? (
-              <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{renderedMarkdown}</ReactMarkdown>
+              </div>
             ) : (
               <div className="mini-list">
                 {healthSnapshot.takeaways.map((text, idx) => (
@@ -700,7 +1058,7 @@ function App() {
                 ) : trendError ? (
                   <div className="error-row">{trendError}</div>
                 ) : trendSeries.length ? (
-                  <ReactECharts ref={trendChartRef} option={trendOption} style={{ height: 360 }} />
+                  <ReactECharts ref={trendChartRef} option={trendOption} opts={{ useResizeObserver: false }} style={{ height: 360 }} />
                 ) : (
                   <div className="loading-text">暂无趋势数据</div>
                 )}
@@ -714,24 +1072,438 @@ function App() {
     }
 
     if (activeNav === 'benchmark') {
+      const interestAreas = [
+        { label: 'Web前端', value: 'frontend' },
+        { label: '后端/企业应用', value: 'backend_enterprise' },
+        { label: '移动开发', value: 'mobile' },
+        { label: '云原生/基础设施', value: 'cloud_infra' },
+        { label: 'AI/深度学习', value: 'ai_ml' },
+        { label: '安全/合规', value: 'security' },
+        { label: '开源生态分析', value: 'oss_analytics' },
+        { label: '文档', value: 'docs' },
+        { label: '翻译', value: 'i18n' },
+      ];
+      const skillStacks = [
+        { label: 'JavaScript/TypeScript', value: 'javascript' },
+        { label: 'Python', value: 'python' },
+        { label: 'Go', value: 'go' },
+        { label: 'Java', value: 'java' },
+        { label: 'Rust', value: 'rust' },
+        { label: 'TypeScript (TS)', value: 'typescript' },
+        { label: 'Node.js / Express', value: 'nodejs' },
+        { label: 'React', value: 'react' },
+        { label: 'Vue', value: 'vue' },
+        { label: 'Angular', value: 'angular' },
+        { label: 'PHP / Laravel', value: 'php' },
+        { label: 'C# / .NET', value: 'csharp' },
+        { label: 'C/C++', value: 'cpp' },
+        { label: 'Kotlin', value: 'kotlin' },
+        { label: 'Swift', value: 'swift' },
+        { label: 'Dart / Flutter', value: 'flutter' },
+        { label: 'SQL / 数据库', value: 'sql' },
+      ];
+      const timeCommits = [
+        { label: '1-2h/周', value: '1-2h' },
+        { label: '3-5h/周', value: '3-5h' },
+        { label: '6-10h/周', value: '6-10h' },
+        { label: '10h+/周', value: '10+h' },
+      ];
+
+      const fallbackProjects = [
+        { repo_full_name: 'microsoft/vscode', fit_score: 92, readiness_score: 88, difficulty: 'Easy', responsiveness: 12, activity: 98, trend_delta: 12, reasons: ['领域匹配：Web前端', '首响较快：12h'] },
+        { repo_full_name: 'facebook/react', fit_score: 90, readiness_score: 80, difficulty: 'Medium', responsiveness: 18, activity: 96, trend_delta: 8, reasons: ['生态活跃', '新手任务充足'] },
+        { repo_full_name: 'vuejs/core', fit_score: 88, readiness_score: 82, difficulty: 'Easy', responsiveness: 16, activity: 94, trend_delta: 15, reasons: ['响应积极', '健康度稳定'] },
+        { repo_full_name: 'python/cpython', fit_score: 85, readiness_score: 76, difficulty: 'Medium', responsiveness: 20, activity: 90, trend_delta: 5, reasons: ['社区成熟', '任务丰富'] },
+      ];
+
+      const rawCards = plan?.recommended_repos?.length ? plan.recommended_repos : fallbackProjects;
+      const cards = rawCards.map((item, idx) => ({
+        id: idx,
+        name: item.repo_full_name,
+        url: item.url || `https://github.com/${item.repo_full_name}`,
+        fit: Math.round(item.fit_score ?? item.match_score ?? 0),
+        readiness: Math.round(item.readiness_score ?? 0),
+        difficulty: item.difficulty || 'Medium',
+        responsiveness: item.responsiveness !== undefined && item.responsiveness !== null ? `${Math.round(item.responsiveness)}h` : '--',
+        activity: item.activity !== undefined && item.activity !== null ? Math.round(item.activity) : '--',
+        trend: typeof item.trend_delta === 'number' ? `${item.trend_delta >= 0 ? '+' : ''}${Math.round(item.trend_delta)}%` : '--',
+        description: item.description || '点击查看仓库详情',
+        reasons: item.reasons || [],
+      }));
+
+      const fallbackTasks = {
+        good_first_issue: [
+          { title: '修复文档中的拼写错误', repo_full_name: 'microsoft/vscode', difficulty: 'Easy', url: '#' },
+        ],
+        help_wanted: [
+          { title: '添加新的测试用例', repo_full_name: 'facebook/react', difficulty: 'Medium', url: '#' },
+        ],
+        docs: [
+          { title: '更新中文文档', repo_full_name: 'vuejs/core', difficulty: 'Easy', url: '#' },
+        ],
+        i18n: [
+          { title: '翻译 README 到日语', repo_full_name: 'python/cpython', difficulty: 'Easy', url: '#' },
+        ],
+      };
+
+      const tasksSource = issuesBoard || plan?.issues_board || fallbackTasks;
+      const taskTabs = [
+        { key: 'good_first_issue', label: 'Good First Issue' },
+        { key: 'help_wanted', label: 'Help Wanted' },
+        { key: 'docs', label: '文档类任务' },
+        { key: 'i18n', label: '翻译类任务' },
+      ];
+    
+
       return (
-        <div className="analysis-wrapper">
-          <section className="analysis-card">
-            <div className="analysis-head">
-              <div>
-                <div className="eyebrow">对标分析</div>
-                <h2>同类分位与差距归因</h2>
+        <div className="newcomer-wrapper">
+          {/* 入门向导 Hero */}
+          <section className="newcomer-hero">
+            <div className="newcomer-hero-content">
+              <h1>启航入门 · 贡献导航</h1>
+              <p>从“我是谁/我会什么/我想参与什么”出发，给新人一条可执行的贡献路径。</p>
+            </div>
+            
+            {/* 三步入门向导 */}
+            <div className="onboarding-steps">
+              <div className="step-card">
+                <div className="step-number">1</div>
+                <div className="step-title">选择兴趣领域</div>
+                <select
+                  className="step-select"
+                  value={domain}
+                  onChange={(e) => {
+                    setDomain(e.target.value);
+                    setPlan(null);
+                    setPlanModalOpen(false);
+                  }}
+                >
+                  {interestAreas.map((area) => (
+                    <option key={area.value} value={area.value}>{area.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="step-card">
+                <div className="step-number">2</div>
+                <div className="step-title">选择技能栈</div>
+                <select
+                  className="step-select"
+                  value={stack}
+                  onChange={(e) => {
+                    setStack(e.target.value);
+                    setPlan(null);
+                    setPlanModalOpen(false);
+                  }}
+                >
+                  {skillStacks.map((skill) => (
+                    <option key={skill.value} value={skill.value}>{skill.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="step-card">
+                <div className="step-number">3</div>
+                <div className="step-title">每周可投入时间</div>
+                <select
+                  className="step-select"
+                  value={timePerWeek}
+                  onChange={(e) => {
+                    setTimePerWeek(e.target.value);
+                    setPlan(null);
+                    setPlanModalOpen(false);
+                  }}
+                >
+                  {timeCommits.map((time) => (
+                    <option key={time.value} value={time.value}>{time.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
-            <div className="mini-grid">
-              {benchmarkCards.map((c) => (
-                <div key={c.title} className="mini-card">
-                  <div className="mini-card-title">{c.title}</div>
-                  <div className="mini-card-detail">{c.detail}</div>
+
+            {/* 关键 CTA */}
+            <div className="hero-cta-group">
+              <button className="primary-btn large" onClick={handleShowRoute} disabled={planLoading}>
+                {planLoading ? '生成中...' : plan ? '查看项目路线' : '生成项目路线'}
+              </button>
+            </div>
+            {planError && <div className="error-row compact">{planError}</div>}
+          </section>
+          
+          {/* 项目推荐卡片区 */}
+          <section className="newcomer-section">
+            <div className="section-head">
+              <h2>项目推荐</h2>
+              <p>根据你的选择，为你推荐匹配度最高的开源项目</p>
+            </div>
+            
+            <div className="project-cards">
+              {cards.map((project) => (
+                <div key={project.id} className="project-card">
+                  <div className="project-header">
+                    <div className="project-title">{project.name}</div>
+                    <div className="match-badge">匹配度 {project.fit}%</div>
+                  </div>
+                  <div className="project-description">{project.description}</div>
+                  <div className="project-metrics">
+                    <div className="metric-item">
+                      <span className="metric-label">新手就绪度</span>
+                      <span className="metric-value">{project.readiness}%</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">上手难度</span>
+                      <span className={`metric-value ${project.difficulty.toLowerCase()}`}>{project.difficulty}</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">维护者响应</span>
+                      <span className="metric-value">{project.responsiveness}</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">活跃度</span>
+                      <span className="metric-value">{project.activity}%</span>
+                    </div>
+                    <div className="metric-item">
+                      <span className="metric-label">近30天趋势</span>
+                      <span className="metric-value positive">{project.trend}</span>
+                    </div>
+                  </div>
+                  {project.reasons?.length ? (
+                    <details className="why-block">
+                      <summary>为什么推荐</summary>
+                      <ul>
+                        {project.reasons.slice(0, 5).map((r, idx) => (
+                          <li key={`${project.id}-reason-${idx}`}>{r}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                  <div className="project-cta">
+                    <button className="project-btn" onClick={() => handleSwitchIssuesRepo(project.name, project.readiness)}>
+                      加载任务
+                    </button>
+                    <button className="project-btn" onClick={() => project.url && window.open(project.url, '_blank', 'noopener')}>
+                      查看项目
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </section>
+
+          {/* 新手任务看板 */}
+          <section className="newcomer-section">
+            <div className="section-head">
+              <h2>新手任务看板</h2>
+              <p>从简单任务开始，迈出你的开源贡献第一步 {activeIssuesRepo ? `（当前：${activeIssuesRepo}）` : ''}</p>
+            </div>
+            
+            <div className="task-board">
+              <div className="task-tabs">
+                {taskTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`task-tab ${activeTaskTab === tab.key ? 'active' : ''}`}
+                    onClick={() => setActiveTaskTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div className="task-list">
+                {issuesLoading && <div className="loading-text">任务加载中...</div>}
+                {(tasksSource[activeTaskTab] || []).map((task, idx) => (
+                  <div key={`${task.title}-${idx}`} className="task-item">
+                    <div className="task-type-badge">{task.repo_full_name}</div>
+                    <div className="task-content">
+                      <div className="task-title">{task.title}</div>
+                      <div className="task-repo">{(task.labels || []).slice(0, 3).join(' / ')}</div>
+                      <div className="task-meta">
+                        <span className={`difficulty ${(task.difficulty || 'Medium').toLowerCase()}`}>{task.difficulty || 'Medium'}</span>
+                        {task.updated_from_now ? <span className="task-updated">{task.updated_from_now}</span> : null}
+                      </div>
+                    </div>
+                    <div className="task-actions">
+                      <button className="task-btn" onClick={() => handleClaimTask(task)} disabled={taskLoading}>
+                        领取任务
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {!planLoading && !issuesLoading && !(tasksSource[activeTaskTab] || []).length && (
+                  <div className="loading-text">暂无任务</div>
+                )}
+              </div>
+            </div>
+          </section>
+          
+          {planModalOpen && (
+                  <div className="trend-modal-overlay" onClick={() => setPlanModalOpen(false)}>
+                    <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+                      <div className="trend-modal-head">
+                        <div>
+                          <div className="eyebrow">AI 项目路线</div>
+                          <h3>推荐原因 & 行动步骤</h3>
+                        </div>
+                        <button className="ghost-btn" onClick={() => setPlanModalOpen(false)}>关闭</button>
+                      </div>
+                      {newcomerReport?.report_json ? (
+                        <div className="plan-modal-body">
+                          <div className="multi-module-report">
+                            {/* 摘要卡片 */}
+                            <div className="report-summary-card">
+                              <h3>摘要</h3>
+                              <ul className="summary-bullets">
+                                {newcomerReport.report_json.summary_bullets.map((bullet, idx) => (
+                                  <li key={idx}>{bullet}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            
+                            {/* 详细部分 */}
+                            <div className="report-sections">
+                              {newcomerReport.report_json.sections.map((section, idx) => (
+                                <div key={idx} className="report-section-card">
+                                  <h3>{section.title}</h3>
+                                  <div className="section-content">
+                                    {section.content_md}
+                                  </div>
+                                  {section.evidence && section.evidence.length > 0 && (
+                                    <div className="section-evidence">
+                                      <h4>证据</h4>
+                                      <ul>
+                                        {section.evidence.map((evidence, eIdx) => (
+                                          <li key={eIdx}>
+                                            {evidence.key}: {evidence.value} {evidence.dt && `(截至 ${evidence.dt})`}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            
+                            {/* 行动建议 */}
+                            {newcomerReport.report_json.actions && newcomerReport.report_json.actions.length > 0 && (
+                              <div className="report-actions-card">
+                                <h3>行动建议</h3>
+                                {newcomerReport.report_json.actions.map((action, idx) => (
+                                  <div key={idx} className="action-item">
+                                    <div className="action-header">
+                                      <span className={`priority-badge ${action.priority.toLowerCase()}`}>{action.priority}</span>
+                                      <h4>{action.title}</h4>
+                                    </div>
+                                    <ul className="action-steps">
+                                      {action.steps.map((step, sIdx) => (
+                                        <li key={sIdx}>{step}</li>
+                                      ))}
+                                    </ul>
+                                    {action.metrics_to_watch && action.metrics_to_watch.length > 0 && (
+                                      <div className="metrics-to-watch">
+                                        <span>监控指标：</span>
+                                        {action.metrics_to_watch.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            
+                            {/* 监控指标 */}
+                            {newcomerReport.report_json.monitor && newcomerReport.report_json.monitor.length > 0 && (
+                              <div className="report-monitor-card">
+                                <h3>监控指标</h3>
+                                <ul className="monitor-list">
+                                  {newcomerReport.report_json.monitor.map((metric, idx) => (
+                                    <li key={idx}>{metric}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            
+                            {/* 警告和数据缺口 */}
+                            {(newcomerReport.report_json.warnings && newcomerReport.report_json.warnings.length > 0) || 
+                             (newcomerReport.report_json.data_gaps && newcomerReport.report_json.data_gaps.length > 0) && (
+                              <div className="report-warnings-card">
+                                {newcomerReport.report_json.warnings && newcomerReport.report_json.warnings.length > 0 && (
+                                  <>
+                                    <h3>警告</h3>
+                                    <ul className="warnings-list">
+                                      {newcomerReport.report_json.warnings.map((warning, idx) => (
+                                        <li key={idx}>{warning}</li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}
+                                {newcomerReport.report_json.data_gaps && newcomerReport.report_json.data_gaps.length > 0 && (
+                                  <>
+                                    <h3>数据缺口</h3>
+                                    <ul className="gaps-list">
+                                      {newcomerReport.report_json.data_gaps.map((gap, idx) => (
+                                        <li key={idx}>{gap}</li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : newcomerReport?.report_markdown ? (
+                        <div className="plan-modal-body markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {newcomerReport.report_markdown}
+                          </ReactMarkdown>
+                        </div>
+                      ) : planSummary ? (
+                        <div className="plan-modal-body markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {planSummary}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="loading-text">暂无路线，请先生成。</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+          {taskModalOpen && (
+            <div className="trend-modal-overlay" onClick={() => setTaskModalOpen(false)}>
+              <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="trend-modal-head">
+                  <div>
+                    <div className="eyebrow">任务领取</div>
+                    <h3>{taskBundle?.issue?.title || '任务步骤'}</h3>
+                  </div>
+                  <button className="ghost-btn" onClick={() => setTaskModalOpen(false)}>关闭</button>
+                </div>
+                {taskError && <div className="error-row">{taskError}</div>}
+                <div className="plan-modal-body">
+                  {(taskBundle?.steps || []).map((step, idx) => (
+                    <div key={`bundle-${idx}`} className="timeline-row">
+                      <div className="timeline-title">{step.title}</div>
+                      <div className="timeline-list">
+                        {(step.commands || []).map((cmd, cIdx) => (
+                          <div key={`bundle-cmd-${idx}-${cIdx}`} className="timeline-row">{cmd}</div>
+                        ))}
+                        {step.note ? <div className="timeline-note">{step.note}</div> : null}
+                      </div>
+                    </div>
+                  ))}
+                  {!taskBundle?.steps?.length && <div className="loading-text">暂无步骤</div>}
+                </div>
+                <div className="modal-footnote">
+                  <button className="primary-btn" onClick={handleCopyTaskBundle} disabled={!taskBundle?.copyable_checklist}>
+                    复制命令清单
+                  </button>
+                  {taskBundle?.issue?.url ? (
+                    <a className="project-btn" href={taskBundle.issue.url} target="_blank" rel="noreferrer">查看 Issue</a>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -739,15 +1511,127 @@ function App() {
     if (activeNav === 'trend') {
       return (
         <div className="analysis-wrapper">
-          <section className="analysis-card">
+          {/* 使用专门的 TrendMonitor 组件显示图表数据 */}
+          <TrendMonitor repo={selectedRepo} />
+          
+          {/* 显示 AI 分析报告 */}
+          <section className="analysis-card markdown-card">
             <div className="analysis-head">
               <div>
-                <div className="eyebrow">趋势预测</div>
-                <h2>未来 4 周走势预估</h2>
+                <div className="eyebrow">AI 分析报告</div>
+                <h2>趋势监控洞察</h2>
               </div>
-              <div className="pill">基于历史指标拟合</div>
             </div>
-            <div className="trend-placeholder">趋势预测模块待接入模型输出，可在此展示预测曲线与置信区间。</div>
+            {trendLoading ? (
+              <div className="loading-text">报告加载中...</div>
+            ) : trendReport?.report_json ? (
+              <div className="multi-module-report">
+                {/* 摘要卡片 */}
+                <div className="report-summary-card">
+                  <h3>摘要</h3>
+                  <ul className="summary-bullets">
+                    {trendReport.report_json.summary_bullets.map((bullet, idx) => (
+                      <li key={idx}>{bullet}</li>
+                    ))}
+                  </ul>
+                </div>
+                
+                {/* 详细部分 */}
+                <div className="report-sections">
+                  {trendReport.report_json.sections.map((section, idx) => (
+                    <div key={idx} className="report-section-card">
+                      <h3>{section.title}</h3>
+                      <div className="section-content">
+                        {section.content_md}
+                      </div>
+                      {section.evidence && section.evidence.length > 0 && (
+                        <div className="section-evidence">
+                          <h4>证据</h4>
+                          <ul>
+                            {section.evidence.map((evidence, eIdx) => (
+                              <li key={eIdx}>
+                                {evidence.key}: {evidence.value} {evidence.dt && `(截至 ${evidence.dt})`}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* 行动建议 */}
+                {trendReport.report_json.actions && trendReport.report_json.actions.length > 0 && (
+                  <div className="report-actions-card">
+                    <h3>行动建议</h3>
+                    {trendReport.report_json.actions.map((action, idx) => (
+                      <div key={idx} className="action-item">
+                        <div className="action-header">
+                          <span className={`priority-badge ${action.priority.toLowerCase()}`}>{action.priority}</span>
+                          <h4>{action.title}</h4>
+                        </div>
+                        <ul className="action-steps">
+                          {action.steps.map((step, sIdx) => (
+                            <li key={sIdx}>{step}</li>
+                          ))}
+                        </ul>
+                        {action.metrics_to_watch && action.metrics_to_watch.length > 0 && (
+                          <div className="metrics-to-watch">
+                            <span>监控指标：</span>
+                            {action.metrics_to_watch.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* 监控指标 */}
+                {trendReport.report_json.monitor && trendReport.report_json.monitor.length > 0 && (
+                  <div className="report-monitor-card">
+                    <h3>监控指标</h3>
+                    <ul className="monitor-list">
+                      {trendReport.report_json.monitor.map((metric, idx) => (
+                        <li key={idx}>{metric}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* 警告和数据缺口 */}
+                {(trendReport.report_json.warnings && trendReport.report_json.warnings.length > 0) || 
+                 (trendReport.report_json.data_gaps && trendReport.report_json.data_gaps.length > 0) && (
+                  <div className="report-warnings-card">
+                    {trendReport.report_json.warnings && trendReport.report_json.warnings.length > 0 && (
+                      <>
+                        <h3>警告</h3>
+                        <ul className="warnings-list">
+                          {trendReport.report_json.warnings.map((warning, idx) => (
+                            <li key={idx}>{warning}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {trendReport.report_json.data_gaps && trendReport.report_json.data_gaps.length > 0 && (
+                      <>
+                        <h3>数据缺口</h3>
+                        <ul className="gaps-list">
+                          {trendReport.report_json.data_gaps.map((gap, idx) => (
+                            <li key={idx}>{gap}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mini-list">
+                {alertList.map((text, idx) => (
+                  <div key={idx} className="list-row">• {text.title}</div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       );
@@ -805,7 +1689,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">OpenRank Agent</div>
+        <div className="brand">OpenSage</div>
         <div className="top-nav-links">
           {navItems.map((item) => (
             <button
@@ -826,20 +1710,49 @@ function App() {
       </header>
 
       <div className="content-grid">
-        <aside className="nav-rail">
+        <aside className="nav-rail repo-rail">
           <div className="nav-rail-header">
-            <div className="nav-rail-title">OpenRank Agent</div>
-            <div className="nav-rail-sub">开源智能治理台</div>
+            <div className="nav-rail-title">仓库栏</div>
+            <div className="nav-rail-sub">搜索仓库、拉取历史数据、刷新当日数据</div>
           </div>
 
-          <button className="nav-new-btn">+ 新对话</button>
+          <div className="repo-search">
+            <label>仓库</label>
+            <input
+              value={repoSearch}
+              onChange={(e) => setRepoSearch(e.target.value)}
+              placeholder="owner/repo"
+            />
+            <button className="repo-use-btn" onClick={() => {
+              const repo = repoSearch || selectedRepo;
+              setSelectedRepo(repo);
+              addToHistory(repo);
+            }}>
+              设为当前
+            </button>
+          </div>
 
-          <div className="nav-rail-group">
-            {conversations.map((c) => (
+          <div className="repo-actions">
+            <button className="mini-btn" onClick={handleEtlRepo} disabled={etlLoading}>
+              {etlLoading ? '拉取中…' : 'ETL 历史'}
+            </button>
+            <button className="mini-btn" onClick={handleRefreshRepo} disabled={refreshOneLoading}>
+              {refreshOneLoading ? '刷新中…' : '刷新当日'}
+            </button>
+          </div>
+          {repoActionMsg && <div className="repo-hint">{repoActionMsg}</div>}
+
+          <div className="nav-rail-group repo-list">
+            {filteredRepos.map((c) => (
               <button
                 key={c.id}
                 className={`nav-conv ${selectedRepo === c.repo ? 'active' : ''}`}
-                onClick={() => handleSelectConversation(c.repo)}
+                onClick={() => {
+                  // 直接更新selectedRepo，确保仓库被正确选中
+                  setSelectedRepo(c.repo);
+                  setRepoSearch(c.repo);
+                  addToHistory(c.repo);
+                }}
               >
                 <div className="nav-conv-title">{c.repo}</div>
                 <div className="nav-conv-note">{c.tag}</div>
@@ -851,46 +1764,125 @@ function App() {
         <main className="chat-column">
           {activeNav === 'ai' ? (
             <>
-              <div className="chat-hero">
-                <div>
-                  <div className="eyebrow">AI Chat · 主工作区</div>
-                  <h1>用对话完成体检、对标、治理和预警</h1>
-                  <p>输入问题或选择提示，Agent 会调用后端 /agent/run 读取真实数据再生成报告。</p>
-                </div>
-                <div className="repo-input-group">
-                  <label>仓库</label>
-                  <input value={selectedRepo} onChange={(e) => setSelectedRepo(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="quick-prompts">
-                {quickPrompts.map((p) => (
-                  <button key={p} className="prompt-chip" onClick={() => handlePromptClick(p)}>
-                    {p}
-                  </button>
-                ))}
-              </div>
-
-              <div className="chat-window">
-                {messages.map((msg) => (
-                  <div key={msg.id} className={`message ${msg.role}`}>
-                    <div className="message-role">{msg.role === 'assistant' ? 'Agent' : '你'}</div>
-                    <div className="message-body">{msg.text}</div>
+              {/* 聊天主区域 - 限制宽度 + 居中 */}
+              <div ref={chatContainerRef} className={`chat-container ${isFullscreen ? 'fullscreen' : ''}`}>
+                {/* 顶部标题栏 - 始终显示 */}
+                <div className="chat-hero-modern">
+                  <div className="chat-hero-header">
+                    <div className="chat-hero-content">
+                      <div className="eyebrow">AI Chat · 主工作区</div>
+                      <h1>用对话完成体检、对标、治理和预警</h1>
+                      <p>输入问题或选择提示，Agent 会调用后端 /agent/run 读取真实数据再生成报告。</p>
+                    </div>
+                    {/* 右上角当前仓库和全屏按钮 */}
+                    <div className="hero-actions">
+                      {/* 当前仓库 */}
+                      <div className="current-repo-badge">
+                        <span className="repo-label">当前仓库:</span>
+                        <span className="repo-value">{selectedRepo}</span>
+                      </div>
+                      {/* 全屏切换按钮 */}
+                      <button 
+                        className="fullscreen-toggle-btn"
+                        onClick={toggleFullscreen}
+                        title={isFullscreen ? '退出全屏' : '全屏'}
+                      >
+                        {isFullscreen ? '⬜' : '⛶'}
+                      </button>
+                    </div>
                   </div>
-                ))}
-                <div ref={listEndRef} />
-              </div>
+                  {/* 快捷提示词 */}
+                  <div className="quick-prompts-inline">
+                    {quickPrompts.map((p) => (
+                      <button key={p} className="prompt-chip-modern" onClick={() => handlePromptClick(p)}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-              <div className="composer">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="问我：体检一下仓库、给出治理建议或生成风险预警"
-                  rows={3}
-                />
-                <button className="primary-btn" onClick={handleSend} disabled={sending || !input.trim()}>
-                  {sending ? '发送中…' : '发送'}
-                </button>
+                {/* 消息列表 */}
+                <div className="chat-window-modern">
+                  {messages.map((msg) => (
+                    <div key={msg.id} className={`message-bubble ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}>
+                      {/* 头像 */}
+                      <div className={`message-avatar ${msg.role === 'user' ? 'avatar-user' : 'avatar-assistant'}`}>
+                        {msg.role === 'assistant' ? '🤖' : '👤'}
+                      </div>
+                      
+                      {/* 消息内容 */}
+                      <div className="message-content-wrapper">
+                        <div className="message-role-label">{msg.role === 'assistant' ? 'OpenSage' : '你'}</div>
+                        <div className={`message-content ${msg.role === 'assistant' ? 'content-assistant' : 'content-user'}`}>
+                          {msg.role === 'assistant' ? (
+                            <div className="markdown-content">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.text}
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <div className="text-content">{msg.text}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {sending && (
+                    <div className="message-bubble message-assistant">
+                      <div className="message-avatar avatar-assistant">🤖</div>
+                      <div className="message-content-wrapper">
+                        <div className="message-role-label">opensage</div>
+                        <div className="message-content content-assistant">
+                          <div className="typing-indicator">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={listEndRef} />
+                </div>
+
+                {/* 底部输入区 - 自适应高度 */}
+                <div className="composer-modern">
+                  <div className="composer-wrapper">
+                    <textarea
+                      value={input}
+                      onChange={(e) => {
+                        setInput(e.target.value);
+                        // 自动调整高度，限制最大高度
+                        e.target.style.height = 'auto';
+                        e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                        }
+                      }}
+                      placeholder="问我：体检一下仓库、给出治理建议或生成风险预警..."
+                      className="composer-input"
+                      rows={1}
+                    />
+                    <button 
+                      className="composer-send-btn" 
+                      onClick={handleSend} 
+                      disabled={sending || !input.trim()}
+                      title="发送 (Enter)"
+                    >
+                      {sending ? (
+                        <span className="sending-spinner">⏳</span>
+                      ) : (
+                        <span>➤</span>
+                      )}
+                    </button>
+                  </div>
+                  <div className="composer-footer">
+                    <span className="composer-hint">支持 Markdown 输入 · 按 Enter 发送，Shift+Enter 换行</span>
+                  </div>
+                </div>
               </div>
             </>
           ) : (

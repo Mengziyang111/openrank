@@ -69,11 +69,11 @@ $$
 
 三个子维度：
 
-$$\text{FirstResponse} = \text{weighted\\_avg}(T(\text{issue\\_first}), T(\text{pr\\_first}), w)$$
+$$\text{FirstResponse} = \text{WeightedAvg}(T(\text{IssueFirst}), T(\text{PrFirst}), w)$$
 
-$$\text{Closing} = \text{weighted\\_avg}(T(\text{issue\\_close}), T(\text{pr\\_close}), w)$$
+$$\text{Closing} = \text{WeightedAvg}(T(\text{IssueClose}), T(\text{PrClose}), w)$$
 
-$$\text{Backlog} = \text{weighted\\_avg}(T(\text{issue\\_age}), T(\text{pr\\_age}), w)$$
+$$\text{Backlog} = \text{WeightedAvg}(T(\text{IssueAge}), T(\text{PrAge}), w)$$
 
 其中权重 $w$ 按 Issue/PR 数量的对数加权：$w_i = \ln(1 + n_i)$
 
@@ -114,7 +114,7 @@ $$\text{Governance} = 0.45 \times F + 0.35 \times P + 0.20 \times T$$
 其中：
 
 - **Files（文件完整度）$F$**：GitHub Community Profile 返回的健康百分比
-  $$F = \text{clamp}(\text{GitHub\\_Health\\_Percentage}, 0, 100)$$
+  $$F = \text{clamp}(\text{GitHubHealthPercentage}, 0, 100)$$
 
 - **Process（流程透明度）$P$**：基于响应度的流程评分
   $$P = 0.6 \times \text{IssueFirstResponse} + 0.4 \times \text{IssueClosing}$$
@@ -147,7 +147,7 @@ $$\text{Security} = 0.70 \times B + 0.20 \times C + 0.10 \times \text{Bonus}$$
 其中：
 
 - **Base（基础分）$B$**
-  $$B = \text{clamp}(10 \times \text{Scorecard\\_Score}, 0, 100)$$
+  $$B = \text{clamp}(10 \times \text{ScorecardScore}, 0, 100)$$
 
 - **Critical（关键检查）$C$**：关键检查项的平均分
   $$C = \text{clamp}\left(\frac{1}{n} \sum_{i=1}^{n} \text{check}_i \times 10, 0, 100\right)$$
